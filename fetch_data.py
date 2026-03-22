@@ -1,96 +1,79 @@
-import yfinance as yf
-import pandas as pd
 import os
+import warnings
+import logging
+
+import pandas as pd
+import yfinance as yf
 from tqdm import tqdm
-import requests
 
-# -------------------------------
-# Step 1: Define limit
-# -------------------------------
-LIMIT = 10
+from fetch_tickers import get_top_stocks
 
-# -------------------------------
-# Step 2: Get US tickers (S&P 500)
-# -------------------------------
-def get_sp500_tickers():
-    cache_path = "sp500.csv"
+warnings.filterwarnings("ignore")
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
-    if os.path.exists(cache_path):
-        return pd.read_csv(cache_path)['Symbol'].tolist()
+SAVE_DIR = "data/prices/"
 
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    headers = {"User-Agent": "Mozilla/5.0"}
 
-    response = requests.get(url, headers=headers)
-    tables = pd.read_html(response.text)
-    table = tables[0]
+def fetch_minute_data(tickers, days=28, chunk_size=7):
+    """
+    Downloads 1-minute OHLCV data for each ticker over the past `days` days.
 
-    table.to_csv(cache_path, index=False)  # cache it
+    yfinance limits 1m interval requests to a 30-day rolling window, so data
+    is fetched in `chunk_size`-day windows and concatenated. Timestamps are
+    converted to US Eastern time with no timezone suffix. Chunks that fall
+    outside Yahoo's allowed range are silently skipped.
 
-    return table['Symbol'].tolist()
-
-tickers = get_sp500_tickers()
-
-# -------------------------------
-# Step 3: Rank by volume
-# -------------------------------
-def get_top_by_volume(tickers, limit=10):
-    volume_data = []
-
-    for ticker in tqdm(tickers[:200]):  # limit initial universe (speed)
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d", interval="1d")
-
-            if len(hist) > 0:
-                avg_volume = hist["Volume"].mean()
-                volume_data.append((ticker, avg_volume))
-        except:
-            continue
-
-    # Sort by volume descending
-    volume_data.sort(key=lambda x: x[1], reverse=True)
-
-    top_tickers = [t[0] for t in volume_data[:limit]]
-    return top_tickers
-
-top_stocks = get_top_by_volume(tickers, LIMIT)
-
-print("Top Stocks:", top_stocks)
-
-# -------------------------------
-# Step 4: Fetch minute data
-# -------------------------------
-def fetch_minute_data(tickers):
+    Returns a dict of {ticker: DataFrame}.
+    """
     data_dict = {}
+    end = pd.Timestamp.now(tz="America/New_York").normalize()
+    start = end - pd.Timedelta(days=days)
 
     for ticker in tqdm(tickers):
+        chunks = []
         try:
-            df = yf.download(
-                ticker,
-                period="5d",        # max allowed for 1m
-                interval="1m",
-                progress=False
-            )
+            chunk_start = start
+            while chunk_start < end:
+                chunk_end = min(chunk_start + pd.Timedelta(days=chunk_size), end)
+                try:
+                    df = yf.download(
+                        ticker,
+                        start=chunk_start.strftime("%Y-%m-%d"),
+                        end=chunk_end.strftime("%Y-%m-%d"),
+                        interval="1m",
+                        auto_adjust=True,
+                        progress=False,
+                    )
+                    if not df.empty:
+                        chunks.append(df)
+                except Exception:
+                    pass
+                chunk_start = chunk_end
 
-            if not df.empty:
-                df.reset_index(inplace=True)
-                data_dict[ticker] = df
-        except:
-            continue
+            if chunks:
+                combined = pd.concat(chunks)
+                combined = combined[~combined.index.duplicated(keep="first")].sort_index()
+                combined.index = combined.index.tz_convert("America/New_York").tz_localize(None)
+                combined.reset_index(inplace=True)
+                data_dict[ticker] = combined
+        except Exception as e:
+            print(f"[!] {ticker}: {e}")
 
     return data_dict
 
-minute_data = fetch_minute_data(top_stocks)
 
-# -------------------------------
-# Step 5: Save to CSV
-# -------------------------------
-save_dir = "data/raw/stocks/"
-os.makedirs(save_dir, exist_ok=True)
+if __name__ == "__main__":
+    top_stocks = get_top_stocks()
 
-for ticker, df in minute_data.items():
-    file_path = os.path.join(save_dir, f"{ticker}.csv")
-    df.to_csv(file_path, index=False)
+    print("\nTop Stocks:\n")
+    for i, (symbol, name) in enumerate(top_stocks.items(), 1):
+        print(f"  {i}. {symbol} - {name}")
+    print()
 
-print("Data saved successfully!")
+    minute_data = fetch_minute_data(list(top_stocks.keys()), days=28)
+
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    for ticker, df in minute_data.items():
+        df.to_csv(os.path.join(SAVE_DIR, f"{ticker}.csv"), index=False)
+
+    print("Data saved successfully.")
