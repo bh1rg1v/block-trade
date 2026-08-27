@@ -12,7 +12,7 @@
 
 Modern quantitative finance, high-frequency trading (HFT), and synthetic market modeling rely heavily on high-volume simulation environments. However, traditional centralized simulation platforms suffer from a critical opacity crisis: execution logs, synthetic trade streams, and backtest results remain susceptible to retroactive tampering, selective dataset pruning, survivorship bias, and opaque manipulation by platform operators. 
 
-In this paper, we present the design, mathematical formalization, implementation, and empirical evaluation of a **Verifiable High-Throughput Trade Simulation Platform** engineered specifically around **NVIDIA Corporation (NVDA)** 1-minute historical market data. Operating on a daily market replay cycle, the system ingests completed U.S. regular trading sessions (09:30 ET to 16:00 ET), normalizes timestamps across U.S. Eastern (`America/New_York`) and India Standard Time (`Asia/Kolkata`), and generates a deterministic stream of **100,000 simulated trades per market minute** ($\approx 1,667\text{ trades/second}$), producing approximately **39,000,000 trades per trading day**.
+In this paper, we present the design, mathematical formalization, implementation, and empirical evaluation of a **Verifiable High-Throughput Trade Simulation Platform** engineered specifically around **NVIDIA Corporation (NVDA)** 1-minute historical market data. Operating on a daily market replay cycle, the system ingests completed U.S. regular trading sessions (09:30 ET to 16:00 ET), normalizes timestamps across U.S. Eastern (`America/New_York`) and India Standard Time (`Asia/Kolkata`), and generates a deterministic stream of **100,000 simulated trades per market minute** (approx. 1,667 trades/second), producing approximately **39,000,000 trades per trading day**.
 
 Rather than naively bloating public blockchains with tens of millions of raw trade records, our system implements a **Storage-Execution Separation Architecture**. Trade records are deterministically encoded into Canonical CBOR (RFC 8949) byte representations and hashed via SHA-256 to build a hierarchical Merkle Tree. The resulting 32-byte Merkle root, alongside a binary dataset SHA-256 digest, is anchored on an Ethereum Layer-2 (L2) public smart contract, while complete datasets are archived to decentralized content-addressed storage (IPFS/Arweave). 
 
@@ -50,11 +50,11 @@ Trustless Verifiable Simulation Architecture (Cryptographically Secured):
 ### 1.2 The Throughput Dilemma: On-Chain Execution vs High-Frequency Simulation
 Public blockchain networks (such as Ethereum Mainnet) provide unprecedented immutability and decentralized consensus. However, public ledgers encounter a severe throughput bottleneck. A high-throughput trade simulation engine generating 100,000 trades per minute produces:
 
-$$\text{Throughput} = \frac{100,000\text{ trades}}{60\text{ seconds}} \approx 1,666.67\text{ trades/second}$$
+$$\mathrm{Throughput} = \frac{100000}{60} \approx 1666.67 \mathrm{~trades/sec}$$
 
 Over a standard 390-minute U.S. regular trading session (09:30 ET to 16:00 ET), the total dataset size reaches:
 
-$$\text{Total Trades } N = 390 \times 100,000 = 39,000,000\text{ trades/day}$$
+$$N = 390 \times 100000 = 39000000 \mathrm{~trades/day}$$
 
 Attempting to write 39 million individual trade records directly onto a blockchain ledger would result in catastrophic state bloat, prohibitive gas costs (costing millions of dollars per daily run), and complete network congestion.
 
@@ -71,7 +71,7 @@ This paper delivers five key contributions to verifiable financial engineering:
 2. **Canonical CBOR Hashing Pipeline**: We define a zero-ambiguity serialization standard using RFC 8949 Canonical CBOR paired with binary SHA-256 Merkle trees.
 3. **Storage-Execution Separation Framework**: We establish the Storage-Execution Separation Theorem, proving how $O(N)$ high-volume dataset payloads can be coupled to $O(1)$ on-chain commitments via IPFS content addressing and Ethereum L2 smart contracts.
 4. **Zero-Trust Audit Protocols**: We formulate $O(\log N)$ single-trade verification and full-dataset integrity audit protocols with formal security proofs against trade fabrication, alteration, and pruning.
-5. **Empirical System Evaluation**: We present extensive benchmarks demonstrating vectorized SIMD trade generation at over $9,000,000\text{ trades/second}$ and complete 39-million-trade Merkle tree construction in under 80 seconds.
+5. **Empirical System Evaluation**: We present extensive benchmarks demonstrating vectorized SIMD trade generation at over 9,000,000 trades/second and complete 39-million-trade Merkle tree construction in under 80 seconds.
 
 ---
 
@@ -127,21 +127,21 @@ The system architecture consists of four distinct entities:
 
 ### 3.2 Security Definitions
 
-#### Definition 1 (Existential Unforgeability under Chosen-Message Attack - EU-CMA)
-A trade commitment scheme is **Existentially Unforgeable** if no polynomial-time adversary $\mathcal{A}$ can construct a trade $T^{\star} \notin \mathcal{T}$ and a valid Merkle proof $\pi^{\star}$ such that $\text{VerifyProof}(T^{\star}, \pi^{\star}, \mathcal{R}) = \text{TRUE}$, except with negligible probability $\epsilon$:
+#### Definition 1 (Existential Unforgeability under Chosen-Message Attack)
+A trade commitment scheme is **Existentially Unforgeable** if no polynomial-time adversary $\mathcal{A}$ can construct a fake trade $T_{\mathrm{fake}} \notin \mathcal{T}$ and a valid Merkle proof $\pi$ such that $\mathbf{Verify}(T_{\mathrm{fake}}, \pi, \mathcal{R}) = \mathbf{true}$, except with negligible probability $\epsilon$:
 
-$$\Pr\left[ \text{VerifyProof}(T^{\star}, \pi^{\star}, \mathcal{R}) = \text{TRUE} \land T^{\star} \notin \mathcal{T} \right] \le \text{Negl}(\lambda)$$
+$$\Pr \left[ \mathbf{Verify}(T_{\mathrm{fake}}, \pi, \mathcal{R}) = \mathbf{true} \land T_{\mathrm{fake}} \notin \mathcal{T} \right] \le \mathrm{Negl}(\lambda)$$
 
 where $\lambda = 256$ is the security parameter of SHA-256.
 
 #### Definition 2 (Non-Repudiation)
-Once a Merkle root $\mathcal{R}$ and dataset hash $\mathcal{H}_{\text{dataset}}$ are committed to smart contract $\mathcal{L}$, the simulator operator $\mathcal{S}$ cannot deny the existence or content of any trade $T_i \in \mathcal{T}$.
+Once a Merkle root $\mathcal{R}$ and dataset hash $\mathcal{H}_{\mathrm{dataset}}$ are committed to smart contract $\mathcal{L}$, the simulator operator $\mathcal{S}$ cannot deny the existence or content of any trade $T_i \in \mathcal{T}$.
 
 #### Definition 3 (Completeness)
-For any trade $T_i$ honestly generated by simulator $\mathcal{S}$, the generated proof $\pi_i$ will always evaluate to $\text{TRUE}$ against the committed Merkle root $\mathcal{R}$.
+For any trade $T_i$ honestly generated by simulator $\mathcal{S}$, the generated proof $\pi_i$ will always evaluate to $\mathbf{true}$ against the committed Merkle root $\mathcal{R}$.
 
 #### Definition 4 (Soundness)
-If a single attribute of trade $T_i$ (such as price, quantity, timestamp, or side) is altered after commitment, the proof verification algorithm will evaluate to $\text{FALSE}$ with probability $1 - 2^{-256}$.
+If a single attribute of trade $T_i$ (such as price, quantity, timestamp, or side) is altered after commitment, the proof verification algorithm will evaluate to $\mathbf{false}$ with probability $1 - 2^{-256}$.
 
 ---
 
@@ -150,26 +150,26 @@ If a single attribute of trade $T_i$ (such as price, quantity, timestamp, or sid
 ### 4.1 Timezone Alignment & Market Hour Normalization
 The simulation engine operates on a daily schedule aligned with U.S. equity market sessions. The source historical market data represents U.S. regular trading hours, defined by the NYSE as:
 
-$$\mathcal{T}_{\text{US}} = [09:30\text{ ET}, 16:00\text{ ET}]$$
+$$\mathcal{T}_{\mathrm{US}} = [09:30 \mathrm{~ET}, 16:00 \mathrm{~ET}]$$
 
 The simulation clock presented to global operators is localized to Indian Standard Time (IST):
 
-$$\mathcal{T}_{\text{SIM}} = [09:30\text{ IST}, 16:00\text{ IST}]$$
+$$\mathcal{T}_{\mathrm{SIM}} = [09:30 \mathrm{~IST}, 16:00 \mathrm{~IST}]$$
 
-Let $t_{\text{ET}} \in \text{America/New\_York}$ and $t_{\text{IST}} \in \text{Asia/Kolkata}$. The mapping function $\mathcal{M}$ converts UTC timestamps into timezone-aware representations:
+Let $t_{\mathrm{ET}} \in \mathrm{America/New\_York}$ and $t_{\mathrm{IST}} \in \mathrm{Asia/Kolkata}$. The mapping function $\mathcal{M}$ converts UTC timestamps into timezone-aware representations:
 
-$$\mathcal{M}(t_{\text{UTC}}) = \left( t_{\text{UTC}} + \Delta_{\text{ET}},\, t_{\text{UTC}} + \Delta_{\text{IST}} \right)$$
+$$\mathcal{M}(t_{\mathrm{UTC}}) = \left( t_{\mathrm{UTC}} + \Delta_{\mathrm{ET}},\, t_{\mathrm{UTC}} + \Delta_{\mathrm{IST}} \right)$$
 
-where $\Delta_{\text{ET}} \in \{-5, -4\}$ hours depending on Daylight Saving Time (EDT/EST) and $\Delta_{\text{IST}} = +5:30$ hours.
+where $\Delta_{\mathrm{ET}} \in \{-5, -4\}$ hours depending on Daylight Saving Time (EDT/EST) and $\Delta_{\mathrm{IST}} = +5:30$ hours.
 
 ### 4.2 Automated Daily Session Ingestion Pipeline (`NVDA.csv`)
 To prevent simulation contamination from partial or actively trading sessions, the backend enforces automated session verification on `NVDA.csv`. Let $\mathcal{S}_d$ represent the set of 1-minute observations recorded for calendar date $d$:
 
-$$\mathcal{S}_d = \{ (p_m^{\text{open}}, p_m^{\text{high}}, p_m^{\text{low}}, p_m^{\text{close}}, v_m) \}_{m=1}^{M_d}$$
+$$\mathcal{S}_d = \{ (p_m^{\mathrm{open}}, p_m^{\mathrm{high}}, p_m^{\mathrm{low}}, p_m^{\mathrm{close}}, v_m) \}_{m=1}^{M_d}$$
 
 A session $\mathcal{S}_d$ is designated as a **Valid Completed Session** if and only if:
 
-$$\text{Completed}(\mathcal{S}_d) = \mathbb{I}\left( d < d_{\text{today}}^{\text{ET}} \lor \left( d = d_{\text{today}}^{\text{ET}} \land t_{\text{now}}^{\text{ET}} > 16:00\text{ ET} \right) \right) \land \mathbb{I}(M_d \ge 60)$$
+$$\mathrm{Completed}(\mathcal{S}_d) = \mathbb{I}\left( d < d_{\mathrm{today}}^{\mathrm{ET}} \lor \left( d = d_{\mathrm{today}}^{\mathrm{ET}} \land t_{\mathrm{now}}^{\mathrm{ET}} > 16:00 \mathrm{~ET} \right) \right) \land \mathbb{I}(M_d \ge 60)$$
 
 where $\mathbb{I}(\cdot)$ is the indicator function. This guarantees that weekends, U.S. market holidays, and incomplete trading days are dynamically filtered out.
 
@@ -194,21 +194,21 @@ where $\mathbb{I}(\cdot)$ is the indicator function. This guarantees that weeken
 ```
 
 ### 4.3 Vectorized SIMD Trade Generation Mechanics
-For each source 1-minute observation $m \in \{1, 2, \dots, M\}$, the simulator generates $K = 100,000$ synthetic trades. Let $p_m^{\text{low}}$ and $p_m^{\text{high}}$ define the price boundaries of observation $m$. The intra-minute price distribution function $P_{m, k}$ is computed using vectorized PCG64 random sampling:
+For each source 1-minute observation $m \in \{1, 2, \dots, M\}$, the simulator generates $K = 100,000$ synthetic trades. Let $p_m^{\mathrm{low}}$ and $p_m^{\mathrm{high}}$ define the price boundaries of observation $m$. The intra-minute price distribution function $P_{m, k}$ is computed using vectorized PCG64 random sampling:
 
-$$P_{m, k} = \text{round}\left( p_m^{\text{low}} + U_{m, k} \cdot \left( p_m^{\text{high}} - p_m^{\text{low}} \right),\, 2 \right)$$
+$$P_{m, k} = \mathrm{round}\left( p_m^{\mathrm{low}} + U_{m, k} \cdot \left( p_m^{\mathrm{high}} - p_m^{\mathrm{low}} \right),\, 2 \right)$$
 
-where $U_{m, k} \sim \text{Uniform}(0, 1)$ is derived from a deterministic pseudo-random state vector.
+where $U_{m, k} \sim \mathrm{Uniform}(0, 1)$ is derived from a deterministic pseudo-random state vector.
 
 The trade quantity $Q_{m, k}$ and order side $S_{m, k}$ are generated via:
 
-$$Q_{m, k} = \lfloor 1 + V_{m, k} \cdot 499 \rfloor, \quad V_{m, k} \sim \text{Uniform}(0, 1)$$
+$$Q_{m, k} = \lfloor 1 + V_{m, k} \cdot 499 \rfloor, \quad V_{m, k} \sim \mathrm{Uniform}(0, 1)$$
 
-$$S_{m, k} = \begin{cases} \text{BUY} & \text{if } W_{m, k} \ge 0.5 \\ \text{SELL} & \text{if } W_{m, k} < 0.5 \end{cases}, \quad W_{m, k} \sim \text{Uniform}(0, 1)$$
+$$S_{m, k} = \begin{cases} \mathrm{BUY} & \text{if } W_{m, k} \ge 0.5 \\ \mathrm{SELL} & \text{if } W_{m, k} < 0.5 \end{cases}, \quad W_{m, k} \sim \mathrm{Uniform}(0, 1)$$
 
 The global unique identifier for trade $k$ in minute $m$ is deterministically calculated as:
 
-$$\text{trade\_id}(m, k) = \text{pad}_{12}\left( (m - 1) \cdot K + k \right)$$
+$$\mathrm{trade\_id}(m, k) = \mathrm{pad}_{12}\left( (m - 1) \cdot K + k \right)$$
 
 ensuring sequential, zero-padded 12-digit string representations ($000000000001 \dots 00039000000$).
 
@@ -237,13 +237,13 @@ To enforce absolute byte determinism across diverse software environments (Pytho
 The structural mapping of trade $T_i$ into canonical dictionary keys is strictly defined:
 
 $$T_i = \begin{pmatrix}
-\text{"price"} & \to & \text{float64}(P_i) \\
-\text{"quantity"} & \to & \text{int64}(Q_i) \\
-\text{"side"} & \to & \text{utf8}(S_i) \\
-\text{"simulation\_timestamp"} & \to & \text{utf8}(\text{TS}_i^{\text{IST}}) \\
-\text{"source\_timestamp"} & \to & \text{utf8}(\text{TS}_i^{\text{ET}}) \\
-\text{"symbol"} & \to & \text{utf8}(\text{"NVDA"}) \\
-\text{"trade\_id"} & \to & \text{utf8}(\text{ID}_i)
+\text{"price"} & \to & \mathrm{float64}(P_i) \\
+\text{"quantity"} & \to & \mathrm{int64}(Q_i) \\
+\text{"side"} & \to & \mathrm{utf8}(S_i) \\
+\text{"simulation\_timestamp"} & \to & \mathrm{utf8}(\mathrm{TS}_i^{\mathrm{IST}}) \\
+\text{"source\_timestamp"} & \to & \mathrm{utf8}(\mathrm{TS}_i^{\mathrm{ET}}) \\
+\text{"symbol"} & \to & \mathrm{utf8}(\text{"NVDA"}) \\
+\text{"trade\_id"} & \to & \mathrm{utf8}(\mathrm{ID}_i)
 \end{pmatrix}$$
 
 Canonical CBOR sorts map keys by lexicographical byte order:
@@ -252,7 +252,7 @@ $$\text{"price"} < \text{"quantity"} < \text{"side"} < \text{"simulation\_timest
 
 Let $\mathcal{C}(T_i)$ denote the canonical CBOR byte stream. The exact leaf hash $h_i$ is computed via cryptographic SHA-256:
 
-$$h_i = \text{SHA-256}\left( \mathcal{C}(T_i) \right) \in \{0, 1\}^{256}$$
+$$h_i = \mathrm{SHA256}\left( \mathcal{C}(T_i) \right) \in \{0, 1\}^{256}$$
 
 ```text
 Trade Record T_i (JSON Object)
@@ -275,11 +275,11 @@ Given an ordered set of leaf hashes $H_0 = [h_1, h_2, \dots, h_N]$, the binary M
 
 For level $L$ containing node array $H_L = [n_1, n_2, \dots, n_{M_L}]$, the parent node array $H_{L+1}$ is computed pairwise:
 
-$$H_{L+1}[j] = \text{SHA-256}\left( H_L[2j] \mathbin{\Vert} H_L[2j + 1] \right), \quad j = 0, 1, \dots, \left\lfloor \frac{M_L}{2} \right\rfloor - 1$$
+$$H_{L+1}[j] = \mathrm{SHA256}\left( H_L[2j] \mathbin{\Vert} H_L[2j + 1] \right), \quad j = 0, 1, \dots, \left\lfloor \frac{M_L}{2} \right\rfloor - 1$$
 
 If the length $M_L$ is odd, the final node $n_{M_L}$ is duplicated to form a balanced pair:
 
-$$H_{L+1}\left[ \left\lfloor \frac{M_L}{2} \right\rfloor \right] = \text{SHA-256}\left( H_L[M_L - 1] \mathbin{\Vert} H_L[M_L - 1] \right)$$
+$$H_{L+1}\left[ \left\lfloor \frac{M_L}{2} \right\rfloor \right] = \mathrm{SHA256}\left( H_L[M_L - 1] \mathbin{\Vert} H_L[M_L - 1] \right)$$
 
 This reduction process terminates when $|H_{L^*}| = 1$, yielding the **Master Merkle Root**:
 
@@ -298,19 +298,19 @@ $$\mathcal{R} = H_{L^*}[0] \in \{0, 1\}^{256}$$
 ### 5.3 Logarithmic Proof Complexity
 To prove that a specific trade $T_i$ exists within a dataset committed to root $\mathcal{R}$, the backend generates a **Merkle Proof** $\pi_i$. The proof comprises the sequence of sibling node hashes along the path from leaf $h_i$ to root $\mathcal{R}$:
 
-$$\pi_i = \left\{ (s_1, \text{pos}_1),\, (s_2, \text{pos}_2),\, \dots,\, (s_d, \text{pos}_d) \right\}$$
+$$\pi_i = \left\{ (s_1, \mathrm{pos}_1),\, (s_2, \mathrm{pos}_2),\, \dots,\, (s_d, \mathrm{pos}_d) \right\}$$
 
-where $d = \lceil \log_2 N \rceil$ is the tree depth, $s_k \in \{0, 1\}^{256}$ is the sibling hash at level $k$, and $\text{pos}_k \in \{\text{left}, \text{right}\}$ specifies the sibling position.
+where $d = \lceil \log_2 N \rceil$ is the tree depth, $s_k \in \{0, 1\}^{256}$ is the sibling hash at level $k$, and $\mathrm{pos}_k \in \{\text{left}, \text{right}\}$ specifies the sibling position.
 
 Space and proof verification time complexities are strictly logarithmic:
 
-$$\text{Proof Size Complexity} = O(\log_2 N)$$
+$$\mathrm{Proof Size Complexity} = O(\log_2 N)$$
 
-$$\text{Verification Time Complexity} = O(\log_2 N)$$
+$$\mathrm{Verification Time Complexity} = O(\log_2 N)$$
 
 For a dataset containing 39,000,000 trades ($N \approx 3.9 \times 10^7$), the tree depth is:
 
-$$d = \lceil \log_2(39,000,000) \rceil = 26\text{ steps}$$
+$$d = \lceil \log_2(39000000) \rceil = 26 \mathrm{~steps}$$
 
 Thus, a lightweight client can verify any trade out of 39 million trades by checking only **26 hash operations**, requiring less than **1 kilobyte of bandwidth**.
 
@@ -321,7 +321,7 @@ Thus, a lightweight client can verify any trade out of 39 million trades by chec
 ### 6.1 The Storage-Execution Separation Theorem
 We establish the **Storage-Execution Separation Theorem** for financial simulation platforms:
 
-> **Theorem 1 (Storage-Execution Decoupling)**: *Let $\mathcal{D}$ be a dataset of size $S(\mathcal{D}) = O(N)$ generated by execution engine $\mathcal{E}$. The security and immutability of $\mathcal{D}$ on an external public consensus network can be achieved with $O(1)$ state overhead if and only if the network stores a collision-resistant cryptographic commitment $\mathcal{K}(\mathcal{D}) = (\mathcal{H}_{\text{data}}, \mathcal{R}_{\text{merkle}})$, while raw data payload $\mathcal{D}$ is persisted in content-addressed storage.*
+> **Theorem 1 (Storage-Execution Decoupling)**: *Let $\mathcal{D}$ be a dataset of size $S(\mathcal{D}) = O(N)$ generated by execution engine $\mathcal{E}$. The security and immutability of $\mathcal{D}$ on an external public consensus network can be achieved with $O(1)$ state overhead if and only if the network stores a collision-resistant cryptographic commitment $\mathcal{K}(\mathcal{D}) = (\mathcal{H}_{\mathrm{data}}, \mathcal{R}_{\mathrm{merkle}})$, while raw data payload $\mathcal{D}$ is persisted in content-addressed storage.*
 
 ```text
                               ┌─────────────────────────────────┐
@@ -344,18 +344,18 @@ We establish the **Storage-Execution Separation Theorem** for financial simulati
 ### 6.2 Apache Parquet & Zstandard Compression
 Upon simulation completion, the full trade dataset is written to Apache Parquet format utilizing **Zstandard (zstd)** compression. Parquet's columnar layout provides optimal compression ratios for financial trade records.
 
-$$\text{Compression Ratio} = \frac{\text{Uncompressed JSON Size}}{\text{Compressed Parquet Size}} \approx \frac{3.2\text{ GB}}{310\text{ MB}} \approx 10.3\times \text{ Reduction}$$
+$$\mathrm{Compression Ratio} = \frac{\mathrm{Uncompressed JSON Size}}{\mathrm{Compressed Parquet Size}} \approx \frac{3.2 \mathrm{~GB}}{310 \mathrm{~MB}} \approx 10.3\times$$
 
 The compressed file is hashed using SHA-256 to generate the immutable binary dataset digest:
 
-$$\mathcal{H}_{\text{dataset}} = \text{SHA-256}\left( \text{FileBytes}(\text{trades.parquet}) \right)$$
+$$\mathcal{H}_{\mathrm{dataset}} = \mathrm{SHA256}\left( \mathrm{FileBytes}(\mathrm{trades.parquet}) \right)$$
 
 ### 6.3 Content-Addressed Decentralized Publishing (IPFS & Arweave)
 To ensure dataset availability without reliance on Render server infrastructure, the Parquet dataset and `metadata.json` are published to **IPFS** and **Arweave**.
 
 The IPFS Content Identifier (CIDv1) is derived via multihash self-description:
 
-$$\text{CIDv1} = \text{Base32}\left( \text{Multihash}(\text{SHA-256}, \text{FileBytes}) \right)$$
+$$\mathrm{CIDv1} = \mathrm{Base32}\left( \mathrm{Multihash}(\mathrm{SHA256}, \mathrm{FileBytes}) \right)$$
 
 This yields a globally unique URI (e.g., `ipfs://bafybeig...`), guaranteeing that any node in the peer-to-peer network can serve and verify the authentic dataset payload.
 
@@ -430,9 +430,9 @@ contract DatasetRegistry {
 ### 6.5 On-Chain Gas Cost Analysis
 By executing commitments on Ethereum L2, transaction gas fees remain negligible:
 
-$$\text{Gas Used} \approx 85,000\text{ units}$$
+$$\mathrm{Gas Used} \approx 85000 \mathrm{~units}$$
 
-$$\text{L2 Cost @ } 0.005\text{ Gwei/gas} \approx \$0.0008\text{ USD per 39M-trade daily simulation}$$
+$$\mathrm{L2 Cost @ } 0.005 \mathrm{~Gwei/gas} \approx \$0.0008 \mathrm{~USD per 39M-trade daily simulation}$$
 
 This demonstrates that anchoring cryptographic proofs on public blockchains is economically viable at scale.
 
@@ -441,18 +441,18 @@ This demonstrates that anchoring cryptographic proofs on public blockchains is e
 ## 7. Verification Protocols & Independent Audit Mechanics
 
 ### 7.1 Protocol A: Single Trade Verification Algorithm
-A user or external auditor wishing to verify trade $T^{\star} = (\text{trade\_id}, \text{price}, \text{quantity}, \dots)$ executes the following zero-trust algorithm:
+A user or external auditor wishing to verify trade $T = (\mathrm{trade\_id}, \mathrm{price}, \mathrm{quantity}, \dots)$ executes the following zero-trust algorithm:
 
 ```text
 Algorithm 1: Independent Single Trade Cryptographic Verification
 ────────────────────────────────────────────────────────────────────────
-Input  : Trade Object T*, Merkle Proof π*, Target Merkle Root R_L2
+Input  : Trade Object T, Merkle Proof π, Target Merkle Root R_L2
 Output : Boolean (True if authentic, False if tampered)
 
-1. cbor_bytes  ← CanonicalCBORSerialize(T*)
+1. cbor_bytes  ← CanonicalCBORSerialize(T)
 2. leaf_hash   ← SHA256(cbor_bytes)
 3. curr_hash   ← leaf_hash
-4. For each step (sibling_hash, pos) in π*:
+4. For each step (sibling_hash, pos) in π:
 5.     If pos == "left" then
 6.         curr_hash ← SHA256(sibling_hash || curr_hash)
 7.     Else
@@ -467,10 +467,10 @@ Output : Boolean (True if authentic, False if tampered)
 ```text
                         Single Trade Verification Flow
                         
-      Trade Record T* ──► Canonical CBOR ──► SHA-256 ──► Leaf Hash h*
+      Trade Record T  ──► Canonical CBOR ──► SHA-256 ──► Leaf Hash h
                                                            │
                                                            ▼
-    Ethereum L2 ◄── Compare Roots ◄── Merkle Fold ◄── Merkle Proof π*
+    Ethereum L2 ◄── Compare Roots ◄── Merkle Fold ◄── Merkle Proof π
      Root R_L2       (Calculated vs    (26 Steps)
                       On-Chain)
 ```
@@ -478,27 +478,27 @@ Output : Boolean (True if authentic, False if tampered)
 ### 7.2 Protocol B: Full Dataset Integrity Audit Algorithm
 An auditor downloading `trades.parquet` from IPFS executes full dataset validation:
 
-1. **Binary Hash Check**: Compute $\mathcal{H}_{\text{downloaded}} = \text{SHA-256}(\text{trades.parquet})$. Compare against `datasetHash` registered in `DatasetRegistry.sol`.
+1. **Binary Hash Check**: Compute $\mathcal{H}_{\mathrm{downloaded}} = \mathrm{SHA256}(\mathrm{trades.parquet})$. Compare against `datasetHash` registered in `DatasetRegistry.sol`.
 2. **Deterministic Re-Execution**: Re-run canonical CBOR hashing across all $N$ rows in `trades.parquet`.
-3. **Merkle Reconstruction**: Rebuild the full binary Merkle tree and extract root $\mathcal{R}_{\text{reconstructed}}$.
-4. **On-Chain Assertion**: Assert $\mathcal{R}_{\text{reconstructed}} == \mathcal{R}_{\text{blockchain}}$.
+3. **Merkle Reconstruction**: Rebuild the full binary Merkle tree and extract root $\mathcal{R}_{\mathrm{reconstructed}}$.
+4. **On-Chain Assertion**: Assert $\mathcal{R}_{\mathrm{reconstructed}} == \mathcal{R}_{\mathrm{blockchain}}$.
 
 If all assertions hold, the auditor possesses **100% cryptographic certainty** that not a single trade record, timestamp, price, or quantity has been altered, injected, or deleted since simulation commitment.
 
 ### 7.3 Formal Security Proofs
 
-#### Theorem 2 (Resistance to Trade Fabrication & Alteration)
-*Under the Collision Resistance property of SHA-256 and existential unforgeability of Merkle trees, adversary $\mathcal{A}$ cannot alter or fabricate trade $T^{\star}$ without detecting a Merkle root collision on-chain.*
+#### Theorem 2 (Resistance to Trade Fabrication and Alteration)
+Under the Collision Resistance property of SHA-256 and existential unforgeability of Merkle trees, adversary $\mathcal{A}$ cannot alter or fabricate a trade $T_i$ without detecting a Merkle root collision on-chain.
 
-**Proof**: Suppose $\mathcal{A}$ modifies $T_i \to T_i'$.  
+**Proof**: Suppose adversary $\mathcal{A}$ modifies trade record $T_i$ into altered record $T_i'$.  
 1. Canonical CBOR serialization produces $\mathcal{C}(T_i') \neq \mathcal{C}(T_i)$.
-2. By collision resistance of SHA-256, $h_i' = \text{SHA-256}(\mathcal{C}(T_i')) \neq h_i$ except with probability $\epsilon \le 2^{-256}$.
-3. Propagating $h_i'$ up the Merkle tree evaluation path yields $\mathcal{R}' \neq \mathcal{R}$.
+2. By collision resistance of SHA-256, $h_i' = \mathrm{SHA256}(\mathcal{C}(T_i')) \neq h_i$ except with probability $\epsilon \le 2^{-256}$.
+3. Propagating $h_i'$ up the Merkle tree evaluation path yields an altered root $\mathcal{R}' \neq \mathcal{R}$.
 4. The smart contract `DatasetRegistry.sol` contains the immutably committed root $\mathcal{R}$.
-5. Therefore, $\text{VerifyTradeProof}(T_i', \pi_i, \mathcal{R}) = \text{FALSE}$. $\blacksquare$
+5. Therefore, $\mathbf{Verify}(T_i', \pi_i, \mathcal{R}) = \mathbf{false}$.
 
 #### Theorem 3 (Immutability of Historical Commitments)
-*Once committed to an Ethereum L2 smart contract, transaction logs are finalized by consensus and cannot be modified by the server operator.*
+Once committed to an Ethereum L2 smart contract, transaction logs are finalized by consensus and cannot be modified by the server operator.
 
 ---
 
@@ -520,9 +520,9 @@ Benchmark evaluation was conducted on an x86_64 architecture running Python 3.14
 
 | Trade Batch Size | Generation Time (ms) | Throughput (Trades / Sec) | RAM Consumption |
 | :--- | :--- | :--- | :--- |
-| **100,000 trades (1 min)** | $12.4\text{ ms}$ | $8,064,516\text{ tps}$ | $14\text{ MB}$ |
-| **1,000,000 trades (10 mins)**| $118.2\text{ ms}$ | $8,460,236\text{ tps}$ | $112\text{ MB}$ |
-| **39,000,000 trades (Full Session)** | $4,320.0\text{ ms}$ | $9,027,777\text{ tps}$ | $2.8\text{ GB}$ |
+| **100,000 trades (1 min)** | $12.4\mathrm{~ms}$ | $8064516\mathrm{~tps}$ | $14\mathrm{~MB}$ |
+| **1,000,000 trades (10 mins)**| $118.2\mathrm{~ms}$ | $8460236\mathrm{~tps}$ | $112\mathrm{~MB}$ |
+| **39,000,000 trades (Full Session)** | $4320.0\mathrm{~ms}$ | $9027777\mathrm{~tps}$ | $2.8\mathrm{~GB}$ |
 
 The simulator engine generates trades at over **9,000,000 trades/second**, easily surpassing the 1,667 trades/second streaming target and enabling fast pre-computation of Merkle proofs.
 
@@ -531,9 +531,9 @@ Pairwise SHA-256 hashing benchmarks across trade array scales:
 
 | Number of Leaves ($N$) | CBOR + SHA-256 Hashing Time | Merkle Tree Build Time | Tree Depth |
 | :--- | :--- | :--- | :--- |
-| **100,000** | $0.18\text{ sec}$ | $0.04\text{ sec}$ | 17 levels |
-| **1,000,000** | $1.72\text{ sec}$ | $0.41\text{ sec}$ | 20 levels |
-| **39,000,000** | $64.50\text{ sec}$ | $14.80\text{ sec}$ | 26 levels |
+| **100,000** | $0.18\mathrm{~sec}$ | $0.04\mathrm{~sec}$ | 17 levels |
+| **1,000,000** | $1.72\mathrm{~sec}$ | $0.41\mathrm{~sec}$ | 20 levels |
+| **39,000,000** | $64.50\text{ sec}$ | $14.80\mathrm{~sec}$ | 26 levels |
 
 The entire 39-million-trade daily Merkle tree is constructed in under **80 seconds**, yielding a single 32-byte Merkle root ready for Ethereum L2 anchoring.
 
@@ -574,7 +574,7 @@ While our platform establishes high-throughput verifiable market replay, several
 
 ## 11. Conclusion
 
-The **NVDA Verifiable High-Throughput Trade Simulation Platform** demonstrates that high performance ($100,000\text{ trades/minute}$) and absolute trustlessness are not mutually exclusive. By leveraging vectorized SIMD simulation engines, Canonical CBOR serialization, binary SHA-256 Merkle trees, decentralized IPFS storage, and Ethereum Layer-2 smart contract commitments, the platform creates an unforgeable bridge between high-speed financial simulation and public blockchain immutability.
+The **NVDA Verifiable High-Throughput Trade Simulation Platform** demonstrates that high performance ($100,000\mathrm{~trades/minute}$) and absolute trustlessness are not mutually exclusive. By leveraging vectorized SIMD simulation engines, Canonical CBOR serialization, binary SHA-256 Merkle trees, decentralized IPFS storage, and Ethereum Layer-2 smart contract commitments, the platform creates an unforgeable bridge between high-speed financial simulation and public blockchain immutability.
 
 In a fast-moving world driven by automated algorithms, trust must no longer be requested—it must be cryptographically proven.
 
