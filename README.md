@@ -10,7 +10,7 @@ An enterprise-grade, high-throughput financial trade simulation and cryptographi
 
 ---
 
-## 💡 Fundamental Core Principle
+## Fundamental Core Principle
 
 > **The blockchain does not store 100,000 individual trades per minute. It stores an immutable cryptographic commitment to the complete dataset.**
 
@@ -18,7 +18,7 @@ By decoupling high-throughput trade generation ($1,667\text{ trades/second}$) fr
 
 ---
 
-## 🏗 System Architecture
+## System Architecture
 
 ```text
                                ┌────────────────────────┐
@@ -69,7 +69,7 @@ By decoupling high-throughput trade generation ($1,667\text{ trades/second}$) fr
 
 ---
 
-## ⚡ Key Features
+## Key Features
 
 1. **Exclusive NVIDIA Focus**: Uses `NVDA` market data exclusively.
 2. **Automated Daily Data Acquisition**:
@@ -97,12 +97,12 @@ By decoupling high-throughput trade generation ($1,667\text{ trades/second}$) fr
    - Commits dataset hashes and Merkle roots to Solidity smart contract (`DatasetRegistry.sol`) deployed on Ethereum L2 (Base / Arbitrum / Optimism).
 9. **React + TypeScript Verification Interface**:
    - Live Dashboard: Real-time IST clock, source session date, 100k trades/min throughput badge, 1,667 trades/sec counter, progress bar, BUY/SELL distribution.
-   - **Independent Trade Verifier**: Look up any trade ID (e.g. `#000000083291`), inspect raw JSON, Canonical CBOR hex, leaf hash, Merkle proof tree, and execute independent verification against the Ethereum L2 Merkle root (`✓ Trade Verified`).
+   - **Independent Trade Verifier**: Look up any trade ID (e.g. `#000000083291`), inspect raw JSON, Canonical CBOR hex, leaf hash, Merkle proof tree, and execute independent verification against the Ethereum L2 Merkle root (`[ Trade Verified ]`).
    - **Full Dataset Verifier**: Inspect Parquet file metadata, IPFS CID, and Ethereum L2 smart contract commitment state.
 
 ---
 
-## 📊 Trade Data Structure
+## Trade Data Structure
 
 Every generated trade adheres to a deterministic schema:
 
@@ -120,7 +120,7 @@ Every generated trade adheres to a deterministic schema:
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
 block-trade/
@@ -162,7 +162,7 @@ block-trade/
 
 ---
 
-## 🚀 Quick Start (Local Setup)
+## Quick Start (Local Setup)
 
 ### 1. Prerequisites
 - Python 3.10 or higher
@@ -200,7 +200,7 @@ Frontend dashboard will run at `http://localhost:5173`.
 
 ---
 
-## 🌐 Production Deployment Guide
+## Production Deployment Guide
 
 ### Deploying Backend to Render
 1. Push your repository to GitHub.
@@ -221,7 +221,7 @@ Frontend dashboard will run at `http://localhost:5173`.
 
 ---
 
-## 🔬 Independent Cryptographic Verification Flow
+## Independent Cryptographic Verification Flow
 
 To verify any trade independently without trusting the application backend:
 
@@ -256,19 +256,19 @@ To verify any trade independently without trusting the application backend:
       [ YES ]                         [ NO ]
          │                               │
          ▼                               ▼
-✓ Trade Verified               ❌ Fraud / Tampering
+[ Trade Verified ]              [ Fraud / Tampering ]
 ```
 
 ---
 
-## 📄 Academic Research Paper
+## Academic Research Paper
 
 For an in-depth mathematical analysis of high-throughput trade simulation, storage-computation decoupling, Canonical CBOR serialization, Merkle tree audit proofs, and the critical importance of trustless architectures in modern financial engineering, read our full 8-page whitepaper:
 
-👉 **[paper.md](file:///d:/github/block-trade/paper.md)**
+[paper.md](file:///d:/github/block-trade/paper.md)
 
 ---
 
-## 📜 License
+## License
 
 This project is released under the **MIT License**.

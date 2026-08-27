@@ -128,9 +128,9 @@ The system architecture consists of four distinct entities:
 ### 3.2 Security Definitions
 
 #### Definition 1 (Existential Unforgeability under Chosen-Message Attack - EU-CMA)
-A trade commitment scheme is **Existentially Unforgeable** if no polynomial-time adversary $\mathcal{A}$ can construct a trade $T^* \notin \mathcal{T}$ and a valid Merkle proof $\pi^*$ such that $\text{VerifyProof}(T^*, \pi^*, \mathcal{R}) = \text{TRUE}$, except with negligible probability $\epsilon$:
+A trade commitment scheme is **Existentially Unforgeable** if no polynomial-time adversary $\mathcal{A}$ can construct a trade $T^{\star} \notin \mathcal{T}$ and a valid Merkle proof $\pi^{\star}$ such that $\text{VerifyProof}(T^{\star}, \pi^{\star}, \mathcal{R}) = \text{TRUE}$, except with negligible probability $\epsilon$:
 
-$$\Pr\left[ \text{VerifyProof}(T^*, \pi^*, \mathcal{R}) = \text{TRUE} \land T^* \notin \mathcal{T} \right] \le \text{Negl}(\lambda)$$
+$$\Pr\left[ \text{VerifyProof}(T^{\star}, \pi^{\star}, \mathcal{R}) = \text{TRUE} \land T^{\star} \notin \mathcal{T} \right] \le \text{Negl}(\lambda)$$
 
 where $\lambda = 256$ is the security parameter of SHA-256.
 
@@ -441,7 +441,7 @@ This demonstrates that anchoring cryptographic proofs on public blockchains is e
 ## 7. Verification Protocols & Independent Audit Mechanics
 
 ### 7.1 Protocol A: Single Trade Verification Algorithm
-A user or external auditor wishing to verify trade $T^* = (\text{trade\_id}, \text{price}, \text{quantity}, \dots)$ executes the following zero-trust algorithm:
+A user or external auditor wishing to verify trade $T^{\star} = (\text{trade\_id}, \text{price}, \text{quantity}, \dots)$ executes the following zero-trust algorithm:
 
 ```text
 Algorithm 1: Independent Single Trade Cryptographic Verification
@@ -488,7 +488,7 @@ If all assertions hold, the auditor possesses **100% cryptographic certainty** t
 ### 7.3 Formal Security Proofs
 
 #### Theorem 2 (Resistance to Trade Fabrication & Alteration)
-*Under the Collision Resistance property of SHA-256 and existential unforgeability of Merkle trees, adversary $\mathcal{A}$ cannot alter or fabricate trade $T^*$ without detecting a Merkle root collision on-chain.*
+*Under the Collision Resistance property of SHA-256 and existential unforgeability of Merkle trees, adversary $\mathcal{A}$ cannot alter or fabricate trade $T^{\star}$ without detecting a Merkle root collision on-chain.*
 
 **Proof**: Suppose $\mathcal{A}$ modifies $T_i \to T_i'$.  
 1. Canonical CBOR serialization produces $\mathcal{C}(T_i') \neq \mathcal{C}(T_i)$.
