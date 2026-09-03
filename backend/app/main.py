@@ -51,6 +51,9 @@ def get_simulation_status():
 
     return {
         "status": meta.get("status", "READY"),
+        "run_number": global_simulator.run_number,
+        "total_runs_completed": len(global_simulator.simulation_history),
+        "is_running": global_simulator.is_running,
         "current_time_ist": now_ist,
         "symbol": "NVDA",
         "source_trading_date": meta.get("source_trading_date", "Pending Sync"),
@@ -66,7 +69,8 @@ def get_simulation_status():
         "merkle_root": meta.get("merkle_root", None),
         "dataset_hash": meta.get("dataset_hash", None),
         "ipfs_cid": meta.get("ipfs_cid", None),
-        "l2_tx_hash": meta.get("l2_tx_hash", None)
+        "l2_tx_hash": meta.get("l2_tx_hash", None),
+        "dataset_id": meta.get("dataset_id", None)
     }
 
 
@@ -92,19 +96,61 @@ def sync_market_data():
 
 
 @app.post("/api/simulation/start")
-def start_simulation():
+def start_simulation(runs: int = Query(1, ge=1, le=10), reset: bool = Query(False)):
     """
-    Executes memory-optimized 100k trades/min simulation for the completed NVDA session,
-    constructs scalable TwoTier Merkle tree, exports Parquet dataset, publishes to IPFS, and commits to Ethereum L2.
+    Executes memory-optimized 100k trades/min simulation for the completed NVDA session.
+    If runs > 1, executes consecutive simulations in a single session with unique run IDs,
+    isolated Merkle roots, and commitments.
     """
     try:
-        result = global_simulator.run_full_simulation()
+        if reset:
+            global_simulator.reset_simulation(next_run=True)
+
+        if runs > 1:
+            results = global_simulator.run_multiple_simulations(run_count=runs)
+            return {
+                "message": f"{len(results)} simulation runs completed successfully.",
+                "total_runs": len(results),
+                "runs": results,
+                "latest_result": results[-1]
+            }
+        else:
+            result = global_simulator.run_full_simulation()
+            return {
+                "message": f"Simulation Run #{global_simulator.run_number} completed successfully.",
+                "result": result
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/simulation/reset")
+def reset_simulation(next_run: bool = Query(True)):
+    """
+    Resets the simulator state to prepare for another run in the current session.
+    Preserves user orders while resetting minute roots and simulation tables.
+    """
+    try:
+        metadata = global_simulator.reset_simulation(next_run=next_run)
         return {
-            "message": "Simulation completed successfully.",
-            "result": result
+            "message": f"Simulation reset. Prepared for Run #{global_simulator.run_number}.",
+            "run_number": global_simulator.run_number,
+            "metadata": metadata
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/simulation/history")
+def get_simulation_history():
+    """
+    Returns the history of all completed simulation runs in the current session.
+    """
+    return {
+        "current_run_number": global_simulator.run_number,
+        "total_runs_completed": len(global_simulator.simulation_history),
+        "history": global_simulator.simulation_history
+    }
 
 
 @app.post("/api/orders", response_model=OrderResponse)
@@ -240,7 +286,7 @@ def get_latest_dataset_commitment():
 async def websocket_simulation_feed(websocket: WebSocket):
     """
     WebSocket streaming endpoint pushing real-time trade updates to React frontend.
-    Uses lightweight sample generation to prevent memory spikes.
+    Supports running multiple simulations consecutively in a single session without disconnecting.
     """
     await websocket.accept()
 
@@ -248,46 +294,78 @@ async def websocket_simulation_feed(websocket: WebSocket):
         if global_simulator.session_df.empty:
             global_simulator.prepare_simulation()
 
-        num_minutes = len(global_simulator.session_df)
+        while True:
+            # Broadcast run started
+            await websocket.send_json({
+                "type": "RUN_STARTED",
+                "run_number": global_simulator.run_number,
+                "dataset_id": global_simulator.dataset_metadata.get("dataset_id", ""),
+                "simulation_date": global_simulator.simulation_date,
+                "source_trading_date": global_simulator.source_trading_date
+            })
 
-        for min_idx in range(num_minutes):
-            row = global_simulator.session_df.iloc[min_idx]
-            global_simulator.current_minute = min_idx + 1
+            num_minutes = len(global_simulator.session_df)
 
-            # Memory-optimized: produce only 20 sample trades for UI virtual list
-            sample_trades = generate_minute_sample_trades(
-                minute_idx=min_idx,
-                source_row=row,
-                sample_count=20,
-                trades_per_minute=100_000,
-                seed=global_simulator.seed,
-                simulation_date_str=global_simulator.simulation_date
-            )
+            for min_idx in range(num_minutes):
+                row = global_simulator.session_df.iloc[min_idx]
+                global_simulator.current_minute = min_idx + 1
 
-            current_p = float(row["Close"])
+                # Memory-optimized: produce only 20 sample trades for UI virtual list
+                sample_trades = generate_minute_sample_trades(
+                    minute_idx=min_idx,
+                    source_row=row,
+                    sample_count=20,
+                    trades_per_minute=global_simulator.trades_per_minute,
+                    seed=global_simulator.seed,
+                    simulation_date_str=global_simulator.simulation_date
+                )
 
-            msg = {
-                "type": "MINUTE_TICK",
-                "minute_index": min_idx + 1,
-                "total_source_minutes": num_minutes,
-                "timestamp_ist": sample_trades[0]["simulation_timestamp"] if sample_trades else "",
-                "trades_generated_this_minute": 100_000,
-                "total_generated_so_far": (min_idx + 1) * 100_000,
-                "current_price": current_p,
-                "sample_trades": sample_trades
-            }
+                current_p = float(row["Close"])
 
-            await websocket.send_json(msg)
-            await asyncio.sleep(0.5)  # Smooth 2-Hz UI update tick
+                msg = {
+                    "type": "MINUTE_TICK",
+                    "run_number": global_simulator.run_number,
+                    "minute_index": min_idx + 1,
+                    "total_source_minutes": num_minutes,
+                    "timestamp_ist": sample_trades[0]["simulation_timestamp"] if sample_trades else "",
+                    "trades_generated_this_minute": global_simulator.trades_per_minute,
+                    "total_generated_so_far": (min_idx + 1) * global_simulator.trades_per_minute,
+                    "current_price": current_p,
+                    "sample_trades": sample_trades
+                }
 
-        # Final completion event: only run simulation if not already computed
-        if not global_simulator.dataset_metadata.get("merkle_root"):
-            global_simulator.run_full_simulation()
+                await websocket.send_json(msg)
+                await asyncio.sleep(0.5)  # Smooth 2-Hz UI update tick
 
-        await websocket.send_json({
-            "type": "SIMULATION_COMPLETE",
-            "metadata": global_simulator.dataset_metadata
-        })
+            # Final completion event: only run simulation if not already computed for this run
+            if not global_simulator.dataset_metadata.get("merkle_root"):
+                global_simulator.run_full_simulation()
+
+            await websocket.send_json({
+                "type": "SIMULATION_COMPLETE",
+                "run_number": global_simulator.run_number,
+                "metadata": global_simulator.dataset_metadata
+            })
+
+            # Keep connection alive; wait for client to trigger next run
+            while True:
+                msg_text = await websocket.receive_text()
+                try:
+                    payload = json.loads(msg_text)
+                    action = str(payload.get("action", "")).upper()
+                    if action in ("RESTART", "NEXT_RUN", "START"):
+                        global_simulator.reset_simulation(next_run=True)
+                        break  # Break inner wait loop to stream next simulation run!
+                    elif action == "RESET":
+                        global_simulator.reset_simulation(next_run=False)
+                        await websocket.send_json({
+                            "type": "RESET_COMPLETE",
+                            "run_number": global_simulator.run_number
+                        })
+                    elif action == "PING":
+                        await websocket.send_json({"type": "PONG"})
+                except Exception:
+                    pass
 
     except WebSocketDisconnect:
         pass

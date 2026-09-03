@@ -41,9 +41,9 @@ class ClickHouseTradeStorage:
     def clear_simulation_data(self, simulation_date: Optional[str] = None):
         with sqlite3.connect(SQLITE_DB_PATH) as conn:
             if simulation_date:
-                conn.execute("DELETE FROM trades WHERE simulation_date = ?", (simulation_date,))
+                conn.execute("DELETE FROM trades WHERE simulation_date = ? AND trade_id NOT LIKE 'TRD-%'", (simulation_date,))
             else:
-                conn.execute("DELETE FROM trades")
+                conn.execute("DELETE FROM trades WHERE trade_id NOT LIKE 'TRD-%'")
             conn.commit()
 
     def insert_trades_batch(self, trades: List[Dict[str, Any]], minute_index: int = 0, simulation_date: str = ""):

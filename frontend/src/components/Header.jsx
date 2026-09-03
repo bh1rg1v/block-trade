@@ -1,5 +1,5 @@
-import React from "react";
-import { Activity, ShieldCheck, Database, RefreshCw, Play } from "lucide-react";
+import React, { useState } from "react";
+import { Activity, ShieldCheck, Database, RefreshCw, Play, RotateCcw, FastForward } from "lucide-react";
 
 export default function Header({
   activeTab,
@@ -7,11 +7,16 @@ export default function Header({
   simStatus,
   istClock,
   sourceDate,
+  runNumber = 1,
+  totalRunsCompleted = 0,
   onSyncData,
   onStartSim,
+  onResetSim,
   loadingSync,
   loadingSim
 }) {
+  const [selectedBatch, setSelectedBatch] = useState(1);
+
   return (
     <header className="border-b border-[#1a2538] bg-[#090d16] px-6 py-4">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -21,7 +26,7 @@ export default function Header({
             <Activity className="w-6 h-6 animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold text-white tracking-wide">
                 NVDA <span className="text-[#76B900]">Trade Engine</span>
               </h1>
@@ -29,6 +34,14 @@ export default function Header({
                 <span className="w-2 h-2 rounded-full bg-[#76B900] animate-ping" />
                 100K TRADES / MIN
               </span>
+              <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40 text-[11px] font-mono font-semibold">
+                RUN #{runNumber}
+              </span>
+              {totalRunsCompleted > 0 && (
+                <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-mono">
+                  {totalRunsCompleted} Finished
+                </span>
+              )}
             </div>
             <p className="text-xs text-gray-400">
               Verifiable High-Throughput Market Simulation Platform • Ethereum L2 Merkle Commitments
@@ -55,7 +68,7 @@ export default function Header({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={onSyncData}
             disabled={loadingSync}
@@ -63,17 +76,55 @@ export default function Header({
             title="Fetch latest NVDA 1m data via yfinance and update NVDA.csv"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingSync ? "animate-spin" : ""}`} />
-            Sync NVDA.csv
+            Sync
+          </button>
+
+          {/* Batch Run Count Selector */}
+          <div className="flex items-center bg-[#0d121d] border border-[#1a2538] rounded-lg p-0.5 text-xs">
+            {[1, 3, 5].map((count) => (
+              <button
+                key={count}
+                onClick={() => setSelectedBatch(count)}
+                className={`px-2 py-1 rounded text-xs font-mono font-medium transition-colors ${
+                  selectedBatch === count
+                    ? "bg-[#1a2538] text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+                title={`Run ${count} simulation(s) consecutively`}
+              >
+                {count}x
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={onResetSim}
+            disabled={loadingSim}
+            className="btn btn-outline text-xs text-gray-300 hover:text-amber-400"
+            title="Reset state and prepare clean Run #N+1"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reset
           </button>
 
           <button
-            onClick={onStartSim}
+            onClick={() => onStartSim(selectedBatch)}
             disabled={loadingSim}
             className="btn btn-nvda text-xs"
-            title="Run 100k trades/min simulation for completed NVDA session"
+            title={`Run ${selectedBatch} simulation(s) for the completed NVDA session`}
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            {loadingSim ? "Simulating..." : "Run Simulation"}
+            {selectedBatch > 1 ? (
+              <FastForward className="w-3.5 h-3.5 fill-current" />
+            ) : (
+              <Play className="w-3.5 h-3.5 fill-current" />
+            )}
+            {loadingSim
+              ? "Simulating..."
+              : selectedBatch > 1
+              ? `Run ${selectedBatch}x Batch`
+              : totalRunsCompleted > 0
+              ? "Run Next Sim"
+              : "Run Simulation"}
           </button>
         </div>
       </div>

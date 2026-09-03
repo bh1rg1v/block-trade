@@ -149,14 +149,18 @@ class NVDATradeSimulator:
     """
     Stateful NVDA High-Throughput Trade Simulator Engine.
     Replays completed 1m U.S. trading session from 09:30 IST to 16:00 IST at 100,000 trades/minute.
-    Uses Two-Tier Streaming Merkle Tree to keep memory footprint under 60 MB.
+    Supports running multiple simulations consecutively in a single session with unique run IDs,
+    isolated Merkle roots, and clean memory recycling.
     """
 
     def __init__(self, seed: int = 42, trades_per_minute: int = 100_000):
+        self.initial_seed = seed
         self.seed = seed
         self.trades_per_minute = trades_per_minute
         self.simulator_version = "v1.0.0"
         self.is_running = False
+        self.run_number = 1
+        self.simulation_history: List[Dict[str, Any]] = []
         self.current_minute = 0
         self.total_generated_trades = 0
         self.session_df = pd.DataFrame()
@@ -168,12 +172,36 @@ class NVDATradeSimulator:
         self.dataset_metadata: Dict[str, Any] = {}
         self.all_trades_sample: List[Dict[str, Any]] = []
 
+    def reset_simulation(self, next_run: bool = True) -> Dict[str, Any]:
+        """
+        Cleanly resets state to prepare for another simulation run in the same session.
+        Preserves past user orders while cleaning old simulation data.
+        """
+        if next_run:
+            self.run_number += 1
+            self.seed = self.initial_seed + (self.run_number - 1)
+
+        self.current_minute = 0
+        self.total_generated_trades = 0
+        self.leaf_hashes.clear()
+        self.minute_roots.clear()
+        self.all_trades_sample.clear()
+        self.master_merkle_tree = None
+        self.dataset_metadata.clear()
+        self.is_running = False
+
+        # Clear previous synthetic simulation data while keeping user orders
+        storage_engine.clear_simulation_data()
+        gc.collect()
+
+        return self.prepare_simulation()
+
     def prepare_simulation(self) -> Dict[str, Any]:
         """
         Pre-simulation step:
         1. Ensure NVDA market data exists -> NVDA.csv.
         2. Identify most recent completed U.S. trading session.
-        3. Precompute metadata and hash commitments.
+        3. Precompute metadata and hash commitments with unique run_number.
         """
         existing = load_nvda_csv()
         if existing.empty:
@@ -186,13 +214,14 @@ class NVDATradeSimulator:
         source_bytes = self.session_df.to_csv(index=False).encode("utf-8")
         source_dataset_hash = "0x" + hashlib.sha256(source_bytes).hexdigest()
 
-        config_str = f"symbol=NVDA;tpm={self.trades_per_minute};seed={self.seed};ver={self.simulator_version}"
+        config_str = f"symbol=NVDA;tpm={self.trades_per_minute};seed={self.seed};run={self.run_number};ver={self.simulator_version}"
         config_hash = "0x" + hashlib.sha256(config_str.encode("utf-8")).hexdigest()
 
-        dataset_id = f"NVDA-SIM-{self.simulation_date}-{self.source_trading_date}"
+        dataset_id = f"NVDA-SIM-{self.simulation_date}-{self.source_trading_date}-R{self.run_number}"
 
         self.dataset_metadata = {
             "dataset_id": dataset_id,
+            "run_number": self.run_number,
             "symbol": "NVDA",
             "source_trading_date": self.source_trading_date,
             "simulation_date": self.simulation_date,
@@ -213,6 +242,7 @@ class NVDATradeSimulator:
         self.leaf_hashes.clear()
         self.minute_roots.clear()
         self.all_trades_sample.clear()
+        self.master_merkle_tree = None
         gc.collect()
 
         return self.dataset_metadata
@@ -222,98 +252,138 @@ class NVDATradeSimulator:
         Executes complete simulation run generating 100k trades/min across all session minutes.
         Uses Two-Tier Streaming Merkle Tree to keep memory footprint under 60 MB.
         Builds Merkle Tree, exports Parquet dataset, publishes to IPFS, and commits to Ethereum L2.
+        Supports repeated execution in a single session with clean isolation.
         """
-        if not self.dataset_metadata or self.session_df.empty:
+        # If this simulator instance has already run, start a fresh run
+        if self.master_merkle_tree is not None or bool(self.minute_roots):
+            self.reset_simulation(next_run=True)
+        elif not self.dataset_metadata or self.session_df.empty:
             self.prepare_simulation()
 
+        self.is_running = True
         start_time = time.time()
         num_minutes = len(self.session_df)
 
-        print(f"[*] Starting NVDA memory-optimized simulation for {num_minutes} minutes at {self.trades_per_minute} trades/min...")
+        print(f"[*] Starting NVDA simulation (Run #{self.run_number}) for {num_minutes} minutes at {self.trades_per_minute} trades/min...")
 
         minute_roots = []
         sample_trades = []
 
-        for min_idx in range(num_minutes):
-            row = self.session_df.iloc[min_idx]
-            trades, hashes = generate_trades_for_minute(
-                minute_idx=min_idx,
-                source_row=row,
-                trades_per_minute=self.trades_per_minute,
-                seed=self.seed,
-                simulation_date_str=self.simulation_date
+        try:
+            for min_idx in range(num_minutes):
+                row = self.session_df.iloc[min_idx]
+                trades, hashes = generate_trades_for_minute(
+                    minute_idx=min_idx,
+                    source_row=row,
+                    trades_per_minute=self.trades_per_minute,
+                    seed=self.seed,
+                    simulation_date_str=self.simulation_date
+                )
+
+                # Compute minute root and discard minute leaf hashes immediately to free memory
+                m_root = compute_merkle_root_streaming(hashes)
+                minute_roots.append(m_root)
+                del hashes
+
+                self.total_generated_trades += len(trades)
+                self.current_minute = min_idx + 1
+
+                # Persist small batch to ClickHouse operational storage (sample for fast query)
+                clickhouse_batch = trades[:min(100, len(trades))]
+                storage_engine.insert_trades_batch(clickhouse_batch, minute_index=min_idx, simulation_date=self.simulation_date)
+
+                if len(sample_trades) < sample_storage_limit:
+                    sample_trades.extend(trades[:min(50, len(trades))])
+
+                del trades
+                if min_idx % 25 == 0:
+                    gc.collect()
+
+            # Store sample trades for verification UI
+            self.all_trades_sample = sample_trades
+            self.minute_roots = minute_roots
+
+            # Build TwoTierMerkleTree over minute roots (390 nodes = ~12KB memory)
+            print("[*] Constructing cryptographic Two-Tier Merkle tree...")
+            self.master_merkle_tree = TwoTierMerkleTree(minute_roots)
+            merkle_root_hex = self.master_merkle_tree.root_hex
+
+            # Export Canonical Parquet Dataset
+            print("[*] Exporting canonical Parquet dataset compressed with Zstandard...")
+            export_result = export_canonical_dataset(
+                trades=sample_trades,
+                metadata=self.dataset_metadata
             )
 
-            # Compute minute root and discard minute leaf hashes immediately to free memory
-            m_root = compute_merkle_root_streaming(hashes)
-            minute_roots.append(m_root)
-            del hashes
+            # Publish to IPFS / Arweave
+            print("[*] Publishing dataset to IPFS / Arweave decentralized storage...")
+            storage_pub = publish_to_decentralized_storage(
+                parquet_path=export_result["parquet_path"],
+                metadata=export_result["metadata"]
+            )
 
-            self.total_generated_trades += len(trades)
-            self.current_minute = min_idx + 1
+            # Anchor commitment on Ethereum L2
+            print("[*] Anchoring Merkle root and dataset commitment on Ethereum L2...")
+            l2_commitment = blockchain_committer.commit_dataset(
+                dataset_id=self.dataset_metadata["dataset_id"],
+                dataset_hash=export_result["dataset_hash"],
+                merkle_root=merkle_root_hex,
+                trade_count=self.total_generated_trades,
+                dataset_uri=storage_pub["dataset_uri"]
+            )
 
-            # Persist small batch to ClickHouse operational storage (sample for fast query)
-            clickhouse_batch = trades[:min(100, len(trades))]
-            storage_engine.insert_trades_batch(clickhouse_batch, minute_index=min_idx, simulation_date=self.simulation_date)
+            elapsed = max(0.001, time.time() - start_time)
+            tps = self.total_generated_trades / elapsed
 
-            if len(sample_trades) < sample_storage_limit:
-                sample_trades.extend(trades[:min(50, len(trades))])
+            self.dataset_metadata.update({
+                "status": "COMPLETED",
+                "run_number": self.run_number,
+                "actual_trade_count": self.total_generated_trades,
+                "elapsed_seconds": round(elapsed, 3),
+                "throughput_tps": round(tps, 2),
+                "merkle_root": merkle_root_hex,
+                "dataset_hash": export_result["dataset_hash"],
+                "ipfs_cid": storage_pub["ipfs_cid"],
+                "dataset_uri": storage_pub["dataset_uri"],
+                "l2_tx_hash": l2_commitment["tx_hash"],
+                "l2_contract": l2_commitment["contract_address"]
+            })
 
-            del trades
-            if min_idx % 25 == 0:
-                gc.collect()
+            # Record run history
+            run_summary = {
+                "run_number": self.run_number,
+                "dataset_id": self.dataset_metadata["dataset_id"],
+                "merkle_root": merkle_root_hex,
+                "actual_trade_count": self.total_generated_trades,
+                "dataset_hash": export_result["dataset_hash"],
+                "ipfs_cid": storage_pub["ipfs_cid"],
+                "l2_tx_hash": l2_commitment["tx_hash"],
+                "elapsed_seconds": round(elapsed, 3),
+                "throughput_tps": round(tps, 2),
+                "completed_at": datetime.now(IST_TZ).isoformat()
+            }
+            self.simulation_history.append(run_summary)
 
-        # Store sample trades for verification UI
-        self.all_trades_sample = sample_trades
-        self.minute_roots = minute_roots
+            return self.dataset_metadata
 
-        # Build TwoTierMerkleTree over minute roots (390 nodes = ~12KB memory)
-        print("[*] Constructing cryptographic Two-Tier Merkle tree...")
-        self.master_merkle_tree = TwoTierMerkleTree(minute_roots)
-        merkle_root_hex = self.master_merkle_tree.root_hex
+        finally:
+            self.is_running = False
+            gc.collect()
 
-        # Export Canonical Parquet Dataset
-        print("[*] Exporting canonical Parquet dataset compressed with Zstandard...")
-        export_result = export_canonical_dataset(
-            trades=sample_trades,
-            metadata=self.dataset_metadata
-        )
-
-        # Publish to IPFS / Arweave
-        print("[*] Publishing dataset to IPFS / Arweave decentralized storage...")
-        storage_pub = publish_to_decentralized_storage(
-            parquet_path=export_result["parquet_path"],
-            metadata=export_result["metadata"]
-        )
-
-        # Anchor commitment on Ethereum L2
-        print("[*] Anchoring Merkle root and dataset commitment on Ethereum L2...")
-        l2_commitment = blockchain_committer.commit_dataset(
-            dataset_id=self.dataset_metadata["dataset_id"],
-            dataset_hash=export_result["dataset_hash"],
-            merkle_root=merkle_root_hex,
-            trade_count=self.total_generated_trades,
-            dataset_uri=storage_pub["dataset_uri"]
-        )
-
-        elapsed = max(0.001, time.time() - start_time)
-        tps = self.total_generated_trades / elapsed
-
-        self.dataset_metadata.update({
-            "status": "COMPLETED",
-            "actual_trade_count": self.total_generated_trades,
-            "elapsed_seconds": round(elapsed, 3),
-            "throughput_tps": round(tps, 2),
-            "merkle_root": merkle_root_hex,
-            "dataset_hash": export_result["dataset_hash"],
-            "ipfs_cid": storage_pub["ipfs_cid"],
-            "dataset_uri": storage_pub["dataset_uri"],
-            "l2_tx_hash": l2_commitment["tx_hash"],
-            "l2_contract": l2_commitment["contract_address"]
-        })
-
-        gc.collect()
-        return self.dataset_metadata
+    def run_multiple_simulations(self, run_count: int = 1, sample_storage_limit: int = 1_000) -> List[Dict[str, Any]]:
+        """
+        Executes multiple consecutive simulation runs in a single session.
+        Each run receives an incremented run_number, its own seed, unique dataset_id,
+        Merkle root, Parquet export, and L2 commitment.
+        """
+        results = []
+        count = max(1, min(run_count, 10))  # Safeguard maximum batch size
+        for i in range(count):
+            if i > 0 or self.master_merkle_tree is not None:
+                self.reset_simulation(next_run=True)
+            res = self.run_full_simulation(sample_storage_limit=sample_storage_limit)
+            results.append(res)
+        return results
 
     def get_proof_for_trade(self, trade_id: str) -> List[Dict[str, str]]:
         """

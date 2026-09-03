@@ -98,13 +98,22 @@ export default function App() {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (data.type === "MINUTE_TICK") {
+            if (data.type === "RUN_STARTED") {
+              setStatusData((prev) => ({
+                ...prev,
+                status: "RUNNING",
+                run_number: data.run_number
+              }));
+              // Preserve user-placed trades while clearing synthetic simulation trades from previous run
+              setTrades((prev) => prev.filter((t) => String(t.trade_id).startsWith("TRD-")));
+            } else if (data.type === "MINUTE_TICK") {
               if (data.current_price) {
                 setCurrentPrice(data.current_price);
               }
               setTrades((prev) => [...data.sample_trades, ...prev].slice(0, 300));
               setStatusData((prev) => ({
                 ...prev,
+                run_number: data.run_number || prev?.run_number || 1,
                 current_minute: data.minute_index,
                 total_source_minutes: data.total_source_minutes,
                 total_generated_trades: data.total_generated_so_far,
@@ -114,6 +123,7 @@ export default function App() {
               setStatusData((prev) => ({
                 ...prev,
                 status: "COMPLETED",
+                run_number: data.run_number || prev?.run_number || 1,
                 ...data.metadata
               }));
             }
@@ -159,10 +169,15 @@ export default function App() {
     }
   };
 
-  const handleStartSim = async () => {
+  const handleStartSim = async (batchCount = 1) => {
     setLoadingSim(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/simulation/start`, { method: "POST" });
+      // If WebSocket is open, send action to start next run streaming immediately
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ action: "NEXT_RUN" }));
+      }
+      const url = `${BACKEND_URL}/api/simulation/start?runs=${batchCount}&reset=true`;
+      const res = await fetch(url, { method: "POST" });
       if (res.ok) {
         await fetchStatus();
       }
@@ -170,6 +185,18 @@ export default function App() {
       alert("Simulation trigger error: " + err.message);
     } finally {
       setLoadingSim(false);
+    }
+  };
+
+  const handleResetSim = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/simulation/reset?next_run=true`, { method: "POST" });
+      if (res.ok) {
+        await fetchStatus();
+        setTrades((prev) => prev.filter((t) => String(t.trade_id).startsWith("TRD-")));
+      }
+    } catch (err) {
+      alert("Simulation reset error: " + err.message);
     }
   };
 
@@ -204,8 +231,11 @@ export default function App() {
         simStatus={statusData?.status}
         istClock={istClock}
         sourceDate={statusData?.source_trading_date}
+        runNumber={statusData?.run_number || 1}
+        totalRunsCompleted={statusData?.total_runs_completed || 0}
         onSyncData={handleSyncData}
         onStartSim={handleStartSim}
+        onResetSim={handleResetSim}
         loadingSync={loadingSync}
         loadingSim={loadingSim}
       />

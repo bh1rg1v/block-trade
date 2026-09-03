@@ -129,3 +129,90 @@ def test_api_orders_and_verification():
     # 4. Verify non-existent trade returns 404
     non_existent = client.get("/api/trades/NON_EXISTENT_TRADE_999999")
     assert non_existent.status_code == 404
+
+
+def test_user_trades_preserved_across_simulation_runs():
+    from backend.app.models import OrderRequest
+    from backend.app.trading_engine import process_order
+
+    # Place a user trade
+    order = OrderRequest(
+        ticker="NVDA",
+        side="BUY",
+        order_type="MARKET",
+        quantity=7,
+        price=181.5
+    )
+    res = process_order(order)
+    user_trade_id = res.trade_id
+    assert storage_engine.get_trade_by_id(user_trade_id) is not None
+
+    # Clear simulation data (as happens when a new simulation starts)
+    storage_engine.clear_simulation_data()
+
+    # User trade MUST still be present in storage!
+    retained_trade = storage_engine.get_trade_by_id(user_trade_id)
+    assert retained_trade is not None
+    assert retained_trade["trade_id"] == user_trade_id
+    assert retained_trade["quantity"] == 7
+
+
+def test_multiple_simulation_runs_lifecycle():
+    from backend.app.simulator import NVDATradeSimulator
+
+    sim = NVDATradeSimulator(seed=100, trades_per_minute=10)
+    meta1 = sim.prepare_simulation()
+    assert meta1["run_number"] == 1
+    assert "-R1" in meta1["dataset_id"]
+
+    # Run 1
+    res1 = sim.run_full_simulation(sample_storage_limit=50)
+    assert res1["run_number"] == 1
+    assert len(sim.minute_roots) == len(sim.session_df)
+    assert len(sim.simulation_history) == 1
+    root1 = res1["merkle_root"]
+
+    # Reset for Run 2
+    meta2 = sim.reset_simulation(next_run=True)
+    assert meta2["run_number"] == 2
+    assert "-R2" in meta2["dataset_id"]
+    assert sim.current_minute == 0
+    assert len(sim.minute_roots) == 0  # No state leakage!
+
+    # Run 2
+    res2 = sim.run_full_simulation(sample_storage_limit=50)
+    assert res2["run_number"] == 2
+    assert len(sim.minute_roots) == len(sim.session_df)  # Still exactly 390, NOT 780!
+    assert len(sim.simulation_history) == 2
+    root2 = res2["merkle_root"]
+
+    # Merkle roots should both be valid 0x hex strings
+    assert root1.startswith("0x")
+    assert root2.startswith("0x")
+
+
+def test_api_multi_run_and_history():
+    from fastapi.testclient import TestClient
+    from backend.app.main import app
+
+    client = TestClient(app)
+
+    # 1. Check status includes run_number
+    status_res = client.get("/api/simulation/status")
+    assert status_res.status_code == 200
+    s_data = status_res.json()
+    assert "run_number" in s_data
+    assert "total_runs_completed" in s_data
+
+    # 2. Reset endpoint
+    reset_res = client.post("/api/simulation/reset?next_run=true")
+    assert reset_res.status_code == 200
+    r_data = reset_res.json()
+    assert r_data["run_number"] >= 2
+
+    # 3. History endpoint
+    hist_res = client.get("/api/simulation/history")
+    assert hist_res.status_code == 200
+    h_data = hist_res.json()
+    assert "current_run_number" in h_data
+    assert "history" in h_data

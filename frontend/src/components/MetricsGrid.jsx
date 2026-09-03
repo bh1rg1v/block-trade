@@ -81,8 +81,9 @@ export default function MetricsGrid({ statusData }) {
           </div>
           <div className="text-[11px] text-gray-400">Replaying NVDA 09:30 to 16:00 IST</div>
         </div>
-        <div className="text-[11px] text-amber-400 font-mono">
-          Progress: {progressPct}% Complete
+        <div className="text-[11px] text-amber-400 font-mono flex items-center justify-between">
+          <span>Progress: {progressPct}%</span>
+          <span className="text-gray-400">Run #{statusData?.run_number || 1}</span>
         </div>
       </div>
     </div>
