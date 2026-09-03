@@ -5,14 +5,14 @@
   "source_trading_date": "2026-08-07",
   "simulation_date": "2026-09-03",
   "total_source_minutes": 391,
-  "expected_trade_count": 3910,
-  "trades_per_minute": 10,
+  "expected_trade_count": 39100000,
+  "trades_per_minute": 100000,
   "source_dataset_hash": "0x7a00caa4a65fd05846a9808f5275c19ed74da5679bbdb1e31bbb4f5b313f9d6c",
   "simulator_version": "v1.0.0",
-  "simulation_config_hash": "0xd95ea8b2ee0b67f1f9db4677c20c720c8811033777c48d3eeb259b49d721a342",
-  "random_seed": 101,
+  "simulation_config_hash": "0x12a532aeaa0f110cf3761b6e20cbbf13b048b859e81fe625de6eb777599ac1e4",
+  "random_seed": 43,
   "status": "PREPARED",
-  "dataset_hash": "0xf97de8bce7953ecc908bb158375fa212b7adcf47b29fe997a7aa51be1755316a",
-  "trade_count": 50,
-  "file_size_bytes": 5973
+  "dataset_hash": "0x135c7757084b00a841a5a3ff4e32e2c8bce8b5809db1b0f116a5d1c131a83c32",
+  "trade_count": 1000,
+  "file_size_bytes": 13464
 }

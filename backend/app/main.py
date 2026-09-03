@@ -3,7 +3,7 @@ import asyncio
 import json
 import pytz
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -95,31 +95,102 @@ def sync_market_data():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/simulation/timeline")
+def get_simulation_timeline():
+    """
+    Supplies the 390-minute session replay timeline and sample trade frames
+    for local client caching on the user's laptop (< 2 MB).
+    """
+    try:
+        if global_simulator.session_df.empty:
+            global_simulator.prepare_simulation()
+
+        num_minutes = len(global_simulator.session_df)
+        frames = []
+
+        for min_idx in range(num_minutes):
+            row = global_simulator.session_df.iloc[min_idx]
+            sample_trades = generate_minute_sample_trades(
+                minute_idx=min_idx,
+                source_row=row,
+                sample_count=10,
+                trades_per_minute=global_simulator.trades_per_minute,
+                seed=global_simulator.seed,
+                simulation_date_str=global_simulator.simulation_date
+            )
+
+            frames.append({
+                "minute_index": min_idx + 1,
+                "total_minutes": num_minutes,
+                "timestamp": sample_trades[0]["simulation_timestamp"] if sample_trades else "",
+                "current_price": float(row["Close"]),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "volume": int(row.get("Volume", 10000)),
+                "sample_trades": sample_trades
+            })
+
+        return {
+            "cache_key": f"NVDA-{global_simulator.source_trading_date}-R{global_simulator.run_number}",
+            "source_trading_date": global_simulator.source_trading_date,
+            "simulation_date": global_simulator.simulation_date,
+            "run_number": global_simulator.run_number,
+            "total_minutes": num_minutes,
+            "frames": frames
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/simulation/start")
-def start_simulation(runs: int = Query(1, ge=1, le=10), reset: bool = Query(False)):
+def start_simulation(
+    background_tasks: BackgroundTasks,
+    runs: int = Query(1, ge=1, le=10),
+    reset: bool = Query(False),
+    background: bool = Query(True)
+):
     """
     Executes memory-optimized 100k trades/min simulation for the completed NVDA session.
-    If runs > 1, executes consecutive simulations in a single session with unique run IDs,
-    isolated Merkle roots, and commitments.
+    If background=True, starts calculation asynchronously so the frontend responds instantly (< 10 ms).
     """
     try:
         if reset:
             global_simulator.reset_simulation(next_run=True)
 
         if runs > 1:
-            results = global_simulator.run_multiple_simulations(run_count=runs)
-            return {
-                "message": f"{len(results)} simulation runs completed successfully.",
-                "total_runs": len(results),
-                "runs": results,
-                "latest_result": results[-1]
-            }
+            if background:
+                background_tasks.add_task(global_simulator.run_multiple_simulations, runs)
+                return {
+                    "status": "RUNNING",
+                    "message": f"Started {runs} simulation runs in background.",
+                    "run_number": global_simulator.run_number,
+                    "runs_queued": runs,
+                    "instant_start": True
+                }
+            else:
+                results = global_simulator.run_multiple_simulations(run_count=runs)
+                return {
+                    "message": f"{len(results)} simulation runs completed successfully.",
+                    "total_runs": len(results),
+                    "runs": results,
+                    "latest_result": results[-1]
+                }
         else:
-            result = global_simulator.run_full_simulation()
-            return {
-                "message": f"Simulation Run #{global_simulator.run_number} completed successfully.",
-                "result": result
-            }
+            if background:
+                background_tasks.add_task(global_simulator.run_full_simulation)
+                return {
+                    "status": "RUNNING",
+                    "message": f"Simulation Run #{global_simulator.run_number} started instantly in background.",
+                    "run_number": global_simulator.run_number,
+                    "instant_start": True
+                }
+            else:
+                result = global_simulator.run_full_simulation()
+                return {
+                    "message": f"Simulation Run #{global_simulator.run_number} completed successfully.",
+                    "result": result
+                }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

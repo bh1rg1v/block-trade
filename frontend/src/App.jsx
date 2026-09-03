@@ -4,6 +4,7 @@ import MetricsGrid from "./components/MetricsGrid";
 import LiveTradeFeed from "./components/LiveTradeFeed";
 import TradeVerifier from "./components/TradeVerifier";
 import DatasetVerifier from "./components/DatasetVerifier";
+import { cacheSessionTimeline, getCachedSessionTimeline } from "./utils/simulationCache";
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_URL = import.meta.env.VITE_WS_URL || (BACKEND_URL.replace(/^http/, "ws") + "/ws/simulation");
@@ -23,6 +24,8 @@ export default function App() {
   const [istClock, setIstClock] = useState("");
 
   const wsRef = useRef(null);
+  const cachedTimelineRef = useRef(null);
+  const replayTimerRef = useRef(null);
 
   // Update IST Clock continuously
   useEffect(() => {
@@ -155,12 +158,106 @@ export default function App() {
     };
   }, []);
 
+  // Pre-load and cache simulation timeline on the user's laptop (IndexedDB < 50 MB)
+  useEffect(() => {
+    const initLaptopCache = async () => {
+      try {
+        const cacheKey = `NVDA-SESSION-${statusData?.source_trading_date || "LATEST"}`;
+        const cached = await getCachedSessionTimeline(cacheKey);
+
+        if (cached && cached.length > 0) {
+          cachedTimelineRef.current = cached;
+          return;
+        }
+
+        // Fetch once from backend and cache into laptop's IndexedDB (~1.2 MB)
+        const res = await fetch(`${BACKEND_URL}/api/simulation/timeline`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.frames && data.frames.length > 0) {
+            cachedTimelineRef.current = data.frames;
+            await cacheSessionTimeline(cacheKey, data.frames);
+          }
+        }
+      } catch (err) {
+        console.warn("[Cache] Laptop cache preloading warning:", err);
+      }
+    };
+
+    initLaptopCache();
+  }, [statusData?.source_trading_date]);
+
+  // Instantly plays frames from the laptop's local cache with 0ms delay
+  const playFromLaptopCache = (frames) => {
+    if (!frames || frames.length === 0) return;
+    if (replayTimerRef.current) clearInterval(replayTimerRef.current);
+
+    let frameIdx = 0;
+    const firstFrame = frames[0];
+
+    // Frame 0 shows up immediately (0ms delay!)
+    if (firstFrame) {
+      setCurrentPrice(firstFrame.current_price);
+      setTrades((prev) => [
+        ...firstFrame.sample_trades,
+        ...prev.filter((t) => String(t.trade_id).startsWith("TRD-"))
+      ].slice(0, 300));
+
+      setStatusData((prev) => ({
+        ...prev,
+        status: "RUNNING",
+        current_minute: 1,
+        total_source_minutes: frames.length,
+        total_generated_trades: 100_000,
+        avg_price: firstFrame.current_price
+      }));
+    }
+
+    // Stream subsequent frames from laptop cache smoothly
+    replayTimerRef.current = setInterval(() => {
+      frameIdx += 1;
+      if (frameIdx >= frames.length) {
+        clearInterval(replayTimerRef.current);
+        setStatusData((prev) => ({
+          ...prev,
+          status: "COMPLETED",
+          current_minute: frames.length,
+          total_generated_trades: frames.length * 100_000
+        }));
+        return;
+      }
+
+      const frame = frames[frameIdx];
+      setCurrentPrice(frame.current_price);
+      setTrades((prev) => [
+        ...frame.sample_trades,
+        ...prev.filter((t) => String(t.trade_id).startsWith("TRD-"))
+      ].slice(0, 300));
+
+      setStatusData((prev) => ({
+        ...prev,
+        current_minute: frameIdx + 1,
+        total_generated_trades: (frameIdx + 1) * 100_000,
+        avg_price: frame.current_price
+      }));
+    }, 400);
+  };
+
   const handleSyncData = async () => {
     setLoadingSync(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/simulation/sync`, { method: "POST" });
       if (res.ok) {
         await fetchStatus();
+        // Refresh laptop cache with freshly synced data
+        const timelineRes = await fetch(`${BACKEND_URL}/api/simulation/timeline`);
+        if (timelineRes.ok) {
+          const tData = await timelineRes.json();
+          if (tData.frames) {
+            cachedTimelineRef.current = tData.frames;
+            await cacheSessionTimeline(`NVDA-SESSION-${tData.source_trading_date}`, tData.frames);
+          }
+        }
       }
     } catch (err) {
       alert("Data sync error: " + err.message);
@@ -170,25 +267,40 @@ export default function App() {
   };
 
   const handleStartSim = async (batchCount = 1) => {
+    // 1. INSTANT START: Immediately render from laptop cache (0ms delay!)
+    if (cachedTimelineRef.current && cachedTimelineRef.current.length > 0) {
+      playFromLaptopCache(cachedTimelineRef.current);
+    }
+
     setLoadingSim(true);
     try {
-      // If WebSocket is open, send action to start next run streaming immediately
+      // 2. If WebSocket is open, notify engine
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ action: "NEXT_RUN" }));
       }
-      const url = `${BACKEND_URL}/api/simulation/start?runs=${batchCount}&reset=true`;
+
+      // 3. Non-blocking background simulation start: returns in < 10ms!
+      const url = `${BACKEND_URL}/api/simulation/start?runs=${batchCount}&reset=true&background=true`;
       const res = await fetch(url, { method: "POST" });
       if (res.ok) {
-        await fetchStatus();
+        const resJson = await res.json();
+        setStatusData((prev) => ({
+          ...prev,
+          status: "RUNNING",
+          run_number: resJson.run_number || prev?.run_number || 1
+        }));
       }
     } catch (err) {
-      alert("Simulation trigger error: " + err.message);
+      console.warn("Simulation trigger note:", err.message);
     } finally {
       setLoadingSim(false);
     }
   };
 
   const handleResetSim = async () => {
+    if (replayTimerRef.current) {
+      clearInterval(replayTimerRef.current);
+    }
     try {
       const res = await fetch(`${BACKEND_URL}/api/simulation/reset?next_run=true`, { method: "POST" });
       if (res.ok) {

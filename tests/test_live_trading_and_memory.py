@@ -216,3 +216,36 @@ def test_api_multi_run_and_history():
     h_data = hist_res.json()
     assert "current_run_number" in h_data
     assert "history" in h_data
+
+
+def test_simulation_timeline_and_instant_start():
+    from fastapi.testclient import TestClient
+    from backend.app.main import app
+    from backend.app.simulator import global_simulator
+
+    client = TestClient(app)
+
+    # Test timeline endpoint for laptop client caching (< 2 MB)
+    timeline_res = client.get("/api/simulation/timeline")
+    assert timeline_res.status_code == 200
+    t_data = timeline_res.json()
+    assert "cache_key" in t_data
+    assert "frames" in t_data
+    assert len(t_data["frames"]) > 0
+    first_frame = t_data["frames"][0]
+    assert "current_price" in first_frame
+    assert "sample_trades" in first_frame
+    assert len(first_frame["sample_trades"]) > 0
+
+    # Test instant background start endpoint (non-blocking)
+    # Set trades_per_minute small during test so TestClient's synchronous background drain finishes in <0.5s
+    orig_tpm = global_simulator.trades_per_minute
+    try:
+        global_simulator.trades_per_minute = 5
+        start_res = client.post("/api/simulation/start?background=true")
+        assert start_res.status_code == 200
+        s_data = start_res.json()
+        assert s_data["status"] == "RUNNING"
+        assert s_data["instant_start"] is True
+    finally:
+        global_simulator.trades_per_minute = orig_tpm
