@@ -12,7 +12,11 @@ const WS_URL = import.meta.env.VITE_WS_URL || (BACKEND_URL.replace(/^http/, "ws"
 export default function App() {
   const [activeTab, setActiveTab] = useState("live");
   const [statusData, setStatusData] = useState(null);
+  const [portfolio, setPortfolio] = useState(null);
+  const [currentPrice, setCurrentPrice] = useState(180.00);
   const [trades, setTrades] = useState([]);
+  const [recentTradeIds, setRecentTradeIds] = useState([]);
+  const [verifierTradeId, setVerifierTradeId] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   const [loadingSync, setLoadingSync] = useState(false);
   const [loadingSim, setLoadingSim] = useState(false);
@@ -44,15 +48,39 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setStatusData(data);
+        if (data.avg_price && data.avg_price > 0) {
+          setCurrentPrice(data.avg_price);
+        }
       }
     } catch (e) {
       console.warn("Status fetch warning:", e);
     }
   };
 
+  // Fetch user portfolio
+  const fetchPortfolio = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/portfolio`);
+      if (res.ok) {
+        const data = await res.json();
+        setPortfolio(data);
+        if (data.orders && data.orders.length > 0) {
+          const userIds = data.orders.map((o) => o.trade_id).filter(Boolean);
+          setRecentTradeIds((prev) => Array.from(new Set([...userIds, ...prev])));
+        }
+      }
+    } catch (e) {
+      console.warn("Portfolio fetch warning:", e);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
-    const timer = setInterval(fetchStatus, 3000);
+    fetchPortfolio();
+    const timer = setInterval(() => {
+      fetchStatus();
+      fetchPortfolio();
+    }, 3000);
     return () => clearInterval(timer);
   }, []);
 
@@ -71,12 +99,16 @@ export default function App() {
           try {
             const data = JSON.parse(event.data);
             if (data.type === "MINUTE_TICK") {
+              if (data.current_price) {
+                setCurrentPrice(data.current_price);
+              }
               setTrades((prev) => [...data.sample_trades, ...prev].slice(0, 300));
               setStatusData((prev) => ({
                 ...prev,
                 current_minute: data.minute_index,
                 total_source_minutes: data.total_source_minutes,
-                total_generated_trades: data.total_generated_so_far
+                total_generated_trades: data.total_generated_so_far,
+                avg_price: data.current_price || prev?.avg_price
               }));
             } else if (data.type === "SIMULATION_COMPLETE") {
               setStatusData((prev) => ({
@@ -141,6 +173,29 @@ export default function App() {
     }
   };
 
+  const handleOrderPlaced = (orderResult) => {
+    // Insert placed trade at the top of the trade feed
+    const newTradeItem = {
+      trade_id: orderResult.trade_id,
+      simulation_timestamp: orderResult.timestamp,
+      source_timestamp: orderResult.timestamp,
+      symbol: orderResult.ticker,
+      side: orderResult.side,
+      price: orderResult.filled_price,
+      quantity: orderResult.quantity
+    };
+
+    setTrades((prev) => [newTradeItem, ...prev].slice(0, 300));
+    setRecentTradeIds((prev) => [orderResult.trade_id, ...prev.filter((id) => id !== orderResult.trade_id)]);
+    fetchPortfolio();
+    fetchStatus();
+  };
+
+  const handleNavigateToVerifier = (tradeId) => {
+    setVerifierTradeId(tradeId);
+    setActiveTab("verify_trade");
+  };
+
   return (
     <div className="min-h-screen bg-[#07090e] text-gray-100 flex flex-col font-sans">
       <Header
@@ -155,17 +210,29 @@ export default function App() {
         loadingSim={loadingSim}
       />
 
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
         {/* Key Metrics Grid */}
         <MetricsGrid statusData={statusData} />
 
         {/* Tab Views */}
         {activeTab === "live" && (
-          <LiveTradeFeed trades={trades} isConnected={isConnected} />
+          <LiveTradeFeed
+            trades={trades}
+            isConnected={isConnected}
+            currentPrice={currentPrice}
+            portfolio={portfolio}
+            onOrderPlaced={handleOrderPlaced}
+            onNavigateToVerifier={handleNavigateToVerifier}
+            backendUrl={BACKEND_URL}
+          />
         )}
 
         {activeTab === "verify_trade" && (
-          <TradeVerifier backendUrl={BACKEND_URL} />
+          <TradeVerifier
+            backendUrl={BACKEND_URL}
+            initialTradeId={verifierTradeId}
+            recentTradeIds={recentTradeIds}
+          />
         )}
 
         {activeTab === "dataset_l2" && (

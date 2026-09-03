@@ -1,0 +1,17 @@
+{
+  "dataset_id": "NVDA-SIM-2026-09-03-2026-08-07",
+  "symbol": "NVDA",
+  "source_trading_date": "2026-08-07",
+  "simulation_date": "2026-09-03",
+  "total_source_minutes": 391,
+  "expected_trade_count": 39100000,
+  "trades_per_minute": 100000,
+  "source_dataset_hash": "0x7a00caa4a65fd05846a9808f5275c19ed74da5679bbdb1e31bbb4f5b313f9d6c",
+  "simulator_version": "v1.0.0",
+  "simulation_config_hash": "0xb4231eb7175b4df395630a7f9bc78d93b54d534fcbce019b0457a5337dde87ef",
+  "random_seed": 42,
+  "status": "PREPARED",
+  "dataset_hash": "0xa47692e3631dd6a587df921974277a67d05f0648c7122ce2543f84aa1e1ec226",
+  "trade_count": 500,
+  "file_size_bytes": 9202
+}

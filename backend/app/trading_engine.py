@@ -10,16 +10,24 @@ from .data_engine import (
     get_available_tickers
 )
 from .models import OrderRequest, OrderResponse, PortfolioResponse, Position
+from .clickhouse_storage import storage_engine
+from .merkle_engine import hash_trade
+from .simulator import global_simulator
 
 
 def get_current_price_for_ticker(ticker: str) -> float:
     """
-    Returns the latest close price from the most recent day available for ticker.
+    Returns current live price: from active simulation bar if available, else recent day data.
     """
+    ticker_upper = ticker.upper()
+    if ticker_upper == "NVDA" and hasattr(global_simulator, "session_df") and not global_simulator.session_df.empty:
+        idx = max(0, min(global_simulator.current_minute - 1 if global_simulator.current_minute > 0 else 0, len(global_simulator.session_df) - 1))
+        return round(float(global_simulator.session_df.iloc[idx]["Close"]), 2)
+
     recent_df, _ = get_most_recent_day_data(ticker)
     if not recent_df.empty and "Close" in recent_df.columns:
-        return float(recent_df.iloc[-1]["Close"])
-    return 100.0
+        return round(float(recent_df.iloc[-1]["Close"]), 2)
+    return 180.00
 
 
 def process_order(order: OrderRequest) -> OrderResponse:
@@ -31,16 +39,18 @@ def process_order(order: OrderRequest) -> OrderResponse:
 
     # Determine execution price
     market_price = get_current_price_for_ticker(ticker)
-    exec_price = order.price if (order_type == "LIMIT" and order.price) else market_price
+    exec_price = round(float(order.price) if (order_type == "LIMIT" and order.price is not None and order.price > 0) else market_price, 2)
 
-    total_cost = exec_price * qty
+    total_cost = round(exec_price * qty, 2)
     timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+    trade_id = f"TRD-{ticker}-{uuid.uuid4().hex[:8].upper()}"
 
     if side == "BUY":
         if cash < total_cost:
             res = OrderResponse(
                 order_id=order_id,
+                trade_id="",
                 timestamp=timestamp_str,
                 ticker=ticker,
                 side=side,
@@ -55,10 +65,10 @@ def process_order(order: OrderRequest) -> OrderResponse:
             return res
 
         # Execute BUY
-        cash -= total_cost
+        cash = round(cash - total_cost, 2)
         curr_pos = positions.get(ticker, {"shares": 0, "average_cost": 0.0})
         total_shares = curr_pos["shares"] + qty
-        new_avg_cost = ((curr_pos["shares"] * curr_pos["average_cost"]) + total_cost) / total_shares
+        new_avg_cost = round(((curr_pos["shares"] * curr_pos["average_cost"]) + total_cost) / total_shares, 2)
         positions[ticker] = {"shares": total_shares, "average_cost": new_avg_cost}
 
     elif side == "SELL":
@@ -66,6 +76,7 @@ def process_order(order: OrderRequest) -> OrderResponse:
         if curr_pos["shares"] < qty:
             res = OrderResponse(
                 order_id=order_id,
+                trade_id="",
                 timestamp=timestamp_str,
                 ticker=ticker,
                 side=side,
@@ -80,7 +91,7 @@ def process_order(order: OrderRequest) -> OrderResponse:
             return res
 
         # Execute SELL
-        cash += total_cost
+        cash = round(cash + total_cost, 2)
         remaining_shares = curr_pos["shares"] - qty
         if remaining_shares == 0:
             del positions[ticker]
@@ -89,8 +100,28 @@ def process_order(order: OrderRequest) -> OrderResponse:
 
     save_portfolio_csv(cash, positions)
 
+    # Persist verified trade record in SQLite storage for instant query by trade_id
+    sim_ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000+05:30")
+    trade_record = {
+        "trade_id": trade_id,
+        "simulation_timestamp": sim_ts,
+        "source_timestamp": sim_ts,
+        "symbol": ticker,
+        "side": side,
+        "price": float(exec_price),
+        "quantity": int(qty)
+    }
+    leaf_hash = "0x" + hash_trade(trade_record).hex()
+
+    storage_engine.insert_trades_batch(
+        [trade_record],
+        minute_index=getattr(global_simulator, "current_minute", 0) or 0,
+        simulation_date=getattr(global_simulator, "simulation_date", "") or datetime.now().strftime("%Y-%m-%d")
+    )
+
     res = OrderResponse(
         order_id=order_id,
+        trade_id=trade_id,
         timestamp=timestamp_str,
         ticker=ticker,
         side=side,
@@ -99,7 +130,8 @@ def process_order(order: OrderRequest) -> OrderResponse:
         price=exec_price,
         filled_price=exec_price,
         status="FILLED",
-        message="Order executed successfully"
+        message="Order placed and matched successfully.",
+        leaf_hash=leaf_hash
     )
     append_order_csv(res.model_dump())
     return res

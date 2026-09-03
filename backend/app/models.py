@@ -12,6 +12,7 @@ class OrderRequest(BaseModel):
 
 class OrderResponse(BaseModel):
     order_id: str
+    trade_id: str
     timestamp: str
     ticker: str
     side: str
@@ -21,6 +22,7 @@ class OrderResponse(BaseModel):
     filled_price: float
     status: str
     message: str
+    leaf_hash: Optional[str] = None
 
 
 class Position(BaseModel):

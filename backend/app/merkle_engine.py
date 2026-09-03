@@ -94,6 +94,65 @@ class MerkleTree:
         return proof
 
 
+def compute_merkle_root_streaming(leaf_hashes: List[bytes]) -> bytes:
+    """
+    Computes Merkle root for a list of leaf hashes without retaining intermediate levels in memory.
+    """
+    if not leaf_hashes:
+        raise ValueError("Cannot compute Merkle root with empty leaves.")
+
+    current = leaf_hashes
+    while len(current) > 1:
+        next_level = []
+        for i in range(0, len(current), 2):
+            left = current[i]
+            right = current[i + 1] if i + 1 < len(current) else left
+            next_level.append(hash_pair(left, right))
+        current = next_level
+    return current[0]
+
+
+class TwoTierMerkleTree:
+    """
+    High-scalability Two-Tier Merkle Tree for millions of trades.
+    Tier 1: Minute sub-trees (computed and discarded per minute).
+    Tier 2: Master tree constructed across all minute roots (O(minutes) memory ~12 KB).
+    Full 26-step Merkle proofs are generated on demand.
+    """
+    def __init__(self, minute_roots: List[bytes]):
+        if not minute_roots:
+            raise ValueError("Cannot construct TwoTierMerkleTree with empty minute roots.")
+        self.minute_roots = minute_roots
+        self.master_tree = MerkleTree(minute_roots)
+
+    @property
+    def root(self) -> bytes:
+        return self.master_tree.root
+
+    @property
+    def root_hex(self) -> str:
+        return self.master_tree.root_hex
+
+    def get_two_tier_proof(self, minute_idx: int, leaf_idx: int, minute_leaf_hashes: List[bytes]) -> List[Dict[str, str]]:
+        """
+        Constructs full deterministic Merkle proof path on demand:
+        [Proof inside minute subtree (17 steps)] + [Proof of minute root in master tree (9 steps)].
+        """
+        if minute_idx < 0 or minute_idx >= len(self.minute_roots):
+            raise IndexError("Minute index out of bounds.")
+        if leaf_idx < 0 or leaf_idx >= len(minute_leaf_hashes):
+            raise IndexError("Leaf index out of bounds in minute subtree.")
+
+        # Minute level proof
+        sub_tree = MerkleTree(minute_leaf_hashes)
+        minute_proof = sub_tree.get_proof(leaf_idx)
+
+        # Master level proof
+        master_proof = self.master_tree.get_proof(minute_idx)
+
+        return minute_proof + master_proof
+
+
 def verify_trade_proof(trade: Dict[str, Any], proof: List[Dict[str, str]], expected_root_hex: str) -> bool:
     """
     Independently verifies if a trade belongs to the Merkle tree with `expected_root_hex`.
